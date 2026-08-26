@@ -1,0 +1,46 @@
+{
+  "name": "hi-dsh",
+  "version": "0.1.0",
+  "description": "hi-dsh: a dsh plugin marketplace — discover, catalog, and install dsh plugins.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "deepseek-ai",
+    "plugin",
+    "marketplace"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hi-dsh/hi-dsh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hi-dsh/hi-dsh/issues"
+  },
+  "homepage": "https://github.com/hi-dsh/hi-dsh#readme"
+}

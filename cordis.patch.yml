@@ -1,0 +1,13 @@
+# hi-dsh bundle patch: mounts the marketplace host into the composed profile tree.
+#
+# Applied as a bundle layer (the profile's dsh.profile.bundles includes 'hi-dsh',
+# resolved two-anchored: the dsh installation first, then the profile's own
+# node_modules where pnpm installs the out-of-tree bundle).
+#
+# The 'hi-dsh' row is addressable by id from a profile's own cordis.patch.yml or
+# a --patch overlay, so a profile can restate catalog settings without editing
+# this file. A patch replaces a targeted row's whole config, so any override
+# must restate the keys it keeps.
+- insert:
+    - id: hi-dsh
+      name: 'hi-dsh'
