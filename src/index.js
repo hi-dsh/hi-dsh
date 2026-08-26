@@ -2,6 +2,7 @@ import { Service } from '@deepseek-ai/cordis'
 
 const NAME = 'hi-dsh'
 const SERVICE = 'marketplace'
+const COMING_SOON = '功能更新中，敬请期待'
 
 /**
  * The marketplace host service.
@@ -40,22 +41,39 @@ export class Marketplace extends Service {
 }
 
 /**
+ * The `/hi-dsh` command handler. A slash command never reaches the model: the
+ * dispatching UI renders the returned `CommandResult` directly, so the
+ * placeholder text is visible as soon as the user types `/hi-dsh`.
+ */
+function hiDshCommandHandler() {
+  return { kind: 'success', text: COMING_SOON }
+}
+
+/**
  * Cordis plugin entry (the default export).
  *
  * The loader imports this module by the package name declared in the bundle
  * patch (`name: hi-dsh`) and applies the default export as a plugin. Mount the
- * Marketplace service, then log a single line so a booted profile can confirm
- * the bundle activated. `ctx.plugin(Marketplace, ...)` must be awaited: Cordis
- * registers the service (`ctx.marketplace`) during that application.
+ * Marketplace service, register the `/hi-dsh` command, and log a single line so
+ * a booted profile can confirm the bundle activated.
+ *
+ * The plugin injects `commands` (provided by `@deepseek-ai/dsh-commands`), so
+ * it runs after the command registry exists and can register into it.
  *
  * @param ctx - the Cordis context.
  * @param config - this entry's row config (see cordis.patch.yml).
  */
 export async function hiDsh(ctx, config = {}) {
   await ctx.plugin(Marketplace, config)
+  ctx.commands.register({
+    name: 'hi-dsh',
+    description: 'hi-dsh 插件市场状态',
+    handler: hiDshCommandHandler,
+  })
   // A plugin cannot read a service it itself provides without `inject`
   // (Cordis rule), so derive the log line from the config, not ctx.marketplace.
   ctx.logger.info('[%s] marketplace mounted (%d catalog entries)', NAME, config.catalog?.length ?? 0)
 }
+hiDsh.inject = ['commands']
 
 export default hiDsh

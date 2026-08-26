@@ -17,7 +17,12 @@ surface (commands, the web UI, an agent tool) can render and extend.
 - Declares a valid dsh bundle (the `dsh.bundle.patch` marker).
 - Mounts a `Marketplace` service (`ctx.marketplace`) with a `list(filter)`
   catalog lookup and a `count()`.
+- Registers the **`/hi-dsh`** slash command, which answers with the placeholder
+  text `功能更新中，敬请期待` (visible in the web UI command surface).
 - Logs a single startup line so a booted profile confirms the bundle activated.
+
+After installing into the `web` profile, type `/hi-dsh` in the session to see
+the placeholder.
 
 ## Install into a profile
 

@@ -14,7 +14,11 @@
 
 - 声明了合法的 dsh bundle（`dsh.bundle.patch` 标记）。
 - 挂载 `Marketplace` 服务（`ctx.marketplace`），提供 `list(filter)` 目录查找和 `count()`。
+- 注册 **`/hi-dsh`** 斜杠命令，回答占位文本 `功能更新中，敬请期待`
+  （在 Web 界面的命令列表里可见）。
 - 启动时打印一行日志，确认 bundle 在 boot 时被激活。
+
+装进 `web` profile 之后，在会话里输入 `/hi-dsh` 就能看到占位文本。
 
 ## 装进 profile
 
