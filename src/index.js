@@ -1,5 +1,5 @@
 import { Service } from '@deepseek-ai/cordis'
-import { argvProfile, cleanHotDir, profileDirectory, registerInstallRoute } from './install.js'
+import { argvProfile, cleanHotDir, profileDirectory, registerRoutes } from './install.js'
 
 const NAME = 'hi-dsh'
 const SERVICE = 'marketplace'
@@ -128,13 +128,14 @@ export async function hiDsh(ctx, config = {}) {
     description: 'hi-dsh 插件市场状态',
     handler: hiDshCommandHandler,
   })
-  // One-click install needs the host webServer (web profile). Injecting it
-  // here — instead of declaring it on the plugin — keeps the command and the
-  // marketplace service alive on hosts without one (headless / tui).
+  // The HTTP routes (GET /hi-dsh/installed, POST /hi-dsh/install,
+  // POST /hi-dsh/uninstall) need the host webServer (web profile). Injecting
+  // them here — instead of declaring it on the plugin — keeps the command and
+  // the marketplace service alive on hosts without one (headless / tui).
   ctx.inject(['webServer'], (host) => {
     const profile = config.profile ?? argvProfile() ?? 'web'
     cleanHotDir(profileDirectory(profile))
-    host.effect(() => registerInstallRoute({
+    host.effect(() => registerRoutes({
       host,
       profile,
       // Server-side trust check: the route must verify the source against
@@ -154,7 +155,7 @@ export async function hiDsh(ctx, config = {}) {
         return marketplace?.feed ?? null
       },
       logger: ctx.logger,
-    }), 'hi-dsh: install route')
+    }), 'hi-dsh: routes')
   })
   ctx.logger.info('[%s] marketplace mounted (feed: %s)', NAME, config.feedUrl ?? FEED_URL)
 }

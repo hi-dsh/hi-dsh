@@ -5,16 +5,19 @@
  *      resolved from the dsh installation) and exports name/inject/apply;
  *   3. apply() registers the three additive seats (Hi button, market
  *      overlay, conversation tab) on a mock slots host;
- *   4. the one-click install UI is wired in: 安装 button + 确认安装 dialog
- *      exist, the old copy-command button and the card-bottom command text
- *      are gone;
- *   5. the server modules parse and export the install surface.
+ *   4. the one-click install UI and the installed tab are wired in: 安装/
+ *      卸载 buttons, 确认安装/确认卸载 dialogs, both tab labels, both routes;
+ *   5. the server modules parse and export the route + ledger surface;
+ *   6. hiDsh() wiring: three routes register, getFeed reads the service via
+ *      ctx.get(), and the ledger behaves (record ∩ dependencies display,
+ *      honest corrupt-ledger 500, feedReady:false, uninstall validations).
  *
  * All host objects (window/document) are mocked HERE, in the test — the
  * production code stays guard-free per AGENTS.md.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
@@ -104,17 +107,25 @@ try {
   check('apply() 无异常', false, err.stack)
 }
 
-// --- 4. one-click install UI surface -----------------------------------------
+// --- 4. one-click install UI + installed tab surface -------------------------
 check('安装按钮存在', code.includes('"安装"') || code.includes("'安装'"))
 check('确认安装按钮存在', code.includes('确认安装'))
-check('旧复制按钮已移除', !code.includes('复制安装命令'))
+check('卸载按钮存在', code.includes('"卸载"') || code.includes("'卸载'"))
+check('确认卸载按钮存在', code.includes('确认卸载'))
+check('两个标签页存在', code.includes('插件市场') && code.includes('已安装插件'))
 check('安装路由路径', code.includes('/hi-dsh/install'))
-check('卡片底部安装命令文本已移除', !code.includes('plugin.install ? h("code"') && !code.includes("plugin.install ? h('code'"))
+check('卸载路由路径', code.includes('/hi-dsh/uninstall'))
+check('已安装路由路径', code.includes('/hi-dsh/installed'))
+check('旧复制按钮已移除', !code.includes('复制安装命令'))
 
-// --- 5. server modules parse & export the install surface --------------------
+// --- 5. server modules parse & export the route + ledger surface -------------
 const install = await import('../src/install.js')
-check('install.js 导出 registerInstallRoute', typeof install.registerInstallRoute === 'function')
+check('install.js 导出 registerRoutes', typeof install.registerRoutes === 'function')
 check('install.js 导出 runDshPlugin', typeof install.runDshPlugin === 'function')
+check('install.js 导出账本工具', typeof install.ledgerPath === 'function'
+  && typeof install.readLedger === 'function'
+  && typeof install.recordInstalled === 'function'
+  && typeof install.recordRemoved === 'function')
 check('install.js 目标推导', install.installTargetFor({ npm: 'dsh-status-rotator', url: 'https://github.com/01Virex/dsh-status-rotator' }) === 'dsh-status-rotator'
   && install.installTargetFor({ url: 'https://github.com/0imzero/dsh-workspace-menu' }) === 'github:0imzero/dsh-workspace-menu'
   && install.installTargetFor({ url: 'https://github.com/owner/repo/tree/main/packages/plugin' }) === 'github:owner/repo#path:/packages/plugin')
@@ -126,21 +137,21 @@ check('parseSimplePatch 拒绝配置行', install.parseSimplePatch('- insert:\n 
 await import('../src/index.js')
 check('index.js 可解析导入', true)
 
-// --- 6. hiDsh() wiring: route registers, getFeed reads the service via ctx.get -
+// --- 6. hiDsh() wiring: three routes, ctx.get feed access, ledger behavior ----
 // Regression for "cannot get property marketplace without inject": the route
-// handler runs outside hi-dsh's fiber, so request-time service access must go
+// handlers run outside hi-dsh's fiber, so request-time service access must go
 // through ctx.get(). Driven against a mock host with a temp DSH_HOME.
-const { tmpHome } = await import('node:fs').then((fs) => ({ tmpHome: fs.mkdtempSync(join(fs.tmpdir ?? '/tmp', 'hidsh-smoke-')) }))
+const tmpHome = mkdtempSync(join(tmpdir(), 'hidsh-smoke-'))
 process.env.DSH_HOME = tmpHome
 const { hiDsh } = await import('../src/index.js')
 
-let effectFn = null
 const marketState = {
   feed: { plugins: [{ name: 'x', npm: 'x', url: 'https://github.com/o/x' }] },
   // Models the real service's on-demand refresh; here the feed stays null
   // (continued fetch failure) so getFeed must answer null, not throw.
   refreshFeed: async () => {},
 }
+const routes = {}
 const hiMock = {
   plugin: async () => null,
   inject: (services, cb) => cb(hiMock.host),
@@ -151,7 +162,7 @@ const hiMock = {
   host: {
     webServer: {
       register: (route) => {
-        effectFn = route
+        routes[route.path] = route
         return () => {}
       },
     },
@@ -161,29 +172,95 @@ const hiMock = {
 let wired = false
 try {
   await hiDsh(hiMock, {})
-  wired = effectFn?.path === '/hi-dsh/install'
-  check('hiDsh 注册 /hi-dsh/install 路由', wired)
+  wired = routes['/hi-dsh/install'] !== undefined
+    && routes['/hi-dsh/installed'] !== undefined
+    && routes['/hi-dsh/uninstall'] !== undefined
+  check('hiDsh 注册三个路由（installed/install/uninstall）', wired, JSON.stringify(Object.keys(routes)))
 } catch (err) {
   check('hiDsh() 无异常', false, err.stack)
 }
 if (wired) {
-  async function post(body, headers = { origin: 'http://h:1', host: 'h:1' }) {
+  async function call(path, method, body) {
     let settle
     const done = new Promise((r) => { settle = r })
     const res = { code: null, sent: null, writeHead(c) { this.code = c }, end(b) { this.sent = { code: this.code, body: b ? JSON.parse(b) : null }; settle() } }
-    const req = { method: 'POST', headers, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)) } }
-    await Promise.race([done, effectFn.handler(req, res)])
+    const req = { method, headers: { origin: 'http://h:1', host: 'h:1' }, async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(JSON.stringify(body)) } }
+    await Promise.race([done, routes[path].handler(req, res)])
     return res.sent
   }
   // getFeed 经 ctx.get 拿到目录：目录内未收录的来源被拒（400 而非 503/500）。
-  const viaGet = await post({ url: 'https://github.com/other/y' })
+  const viaGet = await call('/hi-dsh/install', 'POST', { url: 'https://github.com/other/y' })
   check('getFeed 经 ctx.get 读取目录', viaGet.code === 400 && viaGet.body.error === '该插件不在目录中，拒绝安装',
     JSON.stringify(viaGet))
   // 服务缺失（ctx.get 返回 undefined）→ 诚实的 503，而不是抛错。
   marketState.feed = null
-  const missing = await post({ url: 'https://github.com/o/x' })
+  const missing = await call('/hi-dsh/install', 'POST', { url: 'https://github.com/o/x' })
   check('服务缺失 → 503 目录未就绪', missing.code === 503, JSON.stringify(missing))
   marketState.feed = { plugins: [{ name: 'x', npm: 'x', url: 'https://github.com/o/x' }] }
+
+  // profile 未初始化（无 package.json）→ 诚实的 500，而非装作空列表。
+  const noProfile = await call('/hi-dsh/installed', 'GET')
+  check('GET installed：profile 未初始化 → 500', noProfile.code === 500 && noProfile.body.error.includes('读取 profile 依赖失败'),
+    JSON.stringify(noProfile))
+
+  // 空账本是合法初始态（从未通过 hi-dsh 安装过）→ 200 + 空列表。
+  const profileDir = join(tmpHome, 'profiles', 'web')
+  mkdirSync(profileDir, { recursive: true })
+  const manifestWith = (deps) => writeFileSync(join(profileDir, 'package.json'),
+    JSON.stringify({ name: 'dsh-profile-web', private: true, dependencies: deps }))
+  manifestWith({})
+  const empty = await call('/hi-dsh/installed', 'GET')
+  check('GET installed：无账本 → 200 空列表', empty.code === 200 && empty.body.ok === true
+    && empty.body.plugins.length === 0 && empty.body.feedReady === true, JSON.stringify(empty))
+
+  // 记账后：账本 ∩ 依赖 显示该插件，并按 npm 名 join 目录元数据。
+  manifestWith({ x: '^1.0.0' })
+  install.recordInstalled(profileDir, ['x'], { target: 'x', source: 'https://github.com/o/x' })
+  const listed = await call('/hi-dsh/installed', 'GET')
+  check('GET installed：账本∩依赖 + catalog join', listed.code === 200 && listed.body.plugins.length === 1
+    && listed.body.plugins[0].name === 'x' && listed.body.plugins[0].spec === '^1.0.0'
+    && listed.body.plugins[0].version === null && listed.body.plugins[0].catalog?.name === 'x'
+    && listed.body.plugins[0].source === 'https://github.com/o/x', JSON.stringify(listed))
+
+  // 终端直接安装的包（依赖里有、账本里没有）不进列表。
+  manifestWith({ x: '^1.0.0', y: '^2.0.0' })
+  const filtered = await call('/hi-dsh/installed', 'GET')
+  check('GET installed：终端安装的包不显示', filtered.code === 200 && filtered.body.plugins.length === 1
+    && filtered.body.plugins[0].name === 'x', JSON.stringify(filtered))
+
+  // 卸载校验：非账本包 / hi-dsh 自身 / 非法包名 → 400，不触发 pnpm。
+  const notLedger = await call('/hi-dsh/uninstall', 'POST', { name: 'y' })
+  check('uninstall：非 hi-dsh 安装的包被拒', notLedger.code === 400 && notLedger.body.error.includes('不是通过 hi-dsh 安装'),
+    JSON.stringify(notLedger))
+  const self = await call('/hi-dsh/uninstall', 'POST', { name: 'hi-dsh' })
+  check('uninstall：拒绝卸载 hi-dsh 自身', self.code === 400 && self.body.error.includes('hi-dsh 自身'),
+    JSON.stringify(self))
+  const bad = await call('/hi-dsh/uninstall', 'POST', { name: 'bad name' })
+  check('uninstall：非法包名被拒', bad.code === 400, JSON.stringify(bad))
+
+  // 账本损坏 → 诚实的 500（可行动的错误信息），不装作空列表。
+  writeFileSync(join(profileDir, 'hi-dsh.json'), '{oops')
+  const corrupt = await call('/hi-dsh/installed', 'GET')
+  check('GET installed：账本损坏 → 500', corrupt.code === 500 && corrupt.body.error.includes('账本'),
+    JSON.stringify(corrupt))
+  const corruptUninstall = await call('/hi-dsh/uninstall', 'POST', { name: 'x' })
+  check('uninstall：账本损坏 → 500', corruptUninstall.code === 500, JSON.stringify(corruptUninstall))
+  rmSync(join(profileDir, 'hi-dsh.json'))
+
+  // feed 不可用 → feedReady:false，本地记录照常返回、catalog 为 null。
+  install.recordInstalled(profileDir, ['x'], { target: 'x', source: 'https://github.com/o/x' })
+  marketState.feed = null
+  const nofeed = await call('/hi-dsh/installed', 'GET')
+  check('GET installed：feed 不可用 → feedReady:false 且仍列出本地记录', nofeed.code === 200
+    && nofeed.body.feedReady === false && nofeed.body.plugins.length === 1 && nofeed.body.plugins[0].catalog === null,
+    JSON.stringify(nofeed))
+  marketState.feed = { plugins: [{ name: 'x', npm: 'x', url: 'https://github.com/o/x' }] }
+
+  // recordRemoved 后列表为空（卸载成功路径的账本部分）。
+  install.recordRemoved(profileDir, 'x')
+  const afterRemove = await call('/hi-dsh/installed', 'GET')
+  check('recordRemoved 后列表为空', afterRemove.code === 200 && afterRemove.body.plugins.length === 0,
+    JSON.stringify(afterRemove))
 }
 
 console.log(failures === 0 ? '\nsmoke: 全部通过' : `\nsmoke: ${failures} 项失败`)

@@ -1,19 +1,30 @@
 /**
- * One-click install for the hi-dsh market: an HTTP route that forwards the
- * install to `dsh plugin --profile <name> add <target>` in the host process,
- * then hot-mounts what it added so the plugin is usable without a restart
- * (the same Include-subtree mechanism dsh-market uses).
+ * hi-dsh HTTP routes, registered on the host webServer (web profile):
+ *   GET  /hi-dsh/installed  — the provenance ledger joined with the profile's
+ *                             dependency table (what hi-dsh installed);
+ *   POST /hi-dsh/install    — forwards the install to
+ *                             `dsh plugin --profile <name> add <target>` in
+ *                             the host process, records the ledger entry, and
+ *                             hot-mounts what it added so the plugin is
+ *                             usable without a restart (the same
+ *                             Include-subtree mechanism dsh-market uses);
+ *   POST /hi-dsh/uninstall  — forwards `dsh plugin --profile <name> remove`.
+ *
+ * Install and uninstall share one busy lock (a profile directory must not
+ * run two pnpm operations at once) and one hot-mount sequence counter.
  *
  * Trust boundary mirrors dsh-market:
- *   - only same-origin POSTs;
- *   - only sources present in the curated catalog feed (the entry must be
- *     found by its GitHub url);
+ *   - mutating routes only accept same-origin POSTs;
+ *   - install only accepts sources present in the curated catalog feed (the
+ *     entry must be found by its GitHub url);
+ *   - uninstall only accepts packages the ledger recorded as hi-dsh-installed
+ *     and that are still profile dependencies — never a free-text target;
  *   - the pnpm target is derived from the entry's structured fields
  *     (npm name, GitHub url) — never from the free-text install command —
  *     and validated against a strict charset allowlist before spawning.
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -204,6 +215,83 @@ function readInstalled(dir) {
   return manifest.dependencies ?? {}
 }
 
+// ---------------------------------------------------------------------------
+// The provenance ledger: which packages were installed through hi-dsh.
+// "Installed via hi-dsh" exists only at install time — pnpm records nothing
+// about who ran the command — so the install route writes one durable entry
+// per package here. The file lives beside the profile manifest, NOT in
+// .hi-dsh/ (that hot-mount directory is wiped on every boot). The dependency
+// table stays the fact source: the ledger is pruned against it on every
+// write, and the installed list is ledger ∩ dependencies, so a package
+// removed out-of-band (a terminal `dsh plugin remove`) drops out on its own.
+// ---------------------------------------------------------------------------
+
+const LEDGER_FILENAME = 'hi-dsh.json'
+
+/** Packages hi-dsh refuses to manage through its own market. */
+const SELF_NAME = 'hi-dsh'
+
+export function ledgerPath(dir) {
+  return join(dir, LEDGER_FILENAME)
+}
+
+/**
+ * Read the ledger. A missing file is the defined initial state (nothing
+ * installed through hi-dsh yet), not an error; a corrupt file is a real
+ * error the caller surfaces instead of pretending the list is empty.
+ */
+export function readLedger(dir) {
+  const file = ledgerPath(dir)
+  if (!existsSync(file)) return { version: 1, installed: {} }
+  const parsed = JSON.parse(readFileSync(file, 'utf8'))
+  if (parsed === null || typeof parsed !== 'object'
+    || parsed.installed === null || typeof parsed.installed !== 'object') {
+    throw new Error('unexpected ledger shape')
+  }
+  return parsed
+}
+
+/** Atomic ledger write (tmp + rename; readers see old or new, never torn). */
+function writeLedger(dir, ledger) {
+  const file = ledgerPath(dir)
+  const tmp = `${file}.tmp`
+  writeFileSync(tmp, `${JSON.stringify(ledger, null, 2)}\n`)
+  renameSync(tmp, file)
+}
+
+/** Record a successful install and prune entries whose package left the profile. */
+export function recordInstalled(dir, added, { target, source }) {
+  const deps = readInstalled(dir)
+  const ledger = readLedger(dir)
+  const installed = {}
+  for (const [name, record] of Object.entries(ledger.installed)) {
+    if (name in deps) installed[name] = record
+  }
+  const at = new Date().toISOString()
+  for (const name of added) {
+    if (!(name in deps)) continue
+    installed[name] = { spec: deps[name], target, source, at }
+  }
+  writeLedger(dir, { version: 1, installed })
+}
+
+/** Drop one package from the ledger after a successful uninstall. */
+export function recordRemoved(dir, name) {
+  const ledger = readLedger(dir)
+  if (!(name in ledger.installed)) return
+  delete ledger.installed[name]
+  writeLedger(dir, ledger)
+}
+
+/** The installed version of one package, or null when it cannot be read. */
+function installedVersion(dir, name) {
+  try {
+    return JSON.parse(readFileSync(join(dir, 'node_modules', name, 'package.json'), 'utf8')).version ?? null
+  } catch {
+    return null
+  }
+}
+
 /** Minimal HTTP helpers, shared with the route (same semantics as dsh-market). */
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -373,114 +461,302 @@ export function cleanHotDir(dir) {
 }
 
 /**
- * Register POST /hi-dsh/install on the host webServer. Returns the route
- * disposer. `getFeed()` returns the catalog feed ({plugins: [...]}) or null
- * while the server-side catalog is unavailable.
+ * Register the hi-dsh HTTP routes on the host webServer:
+ *   GET  /hi-dsh/installed  — ledger ∩ profile dependencies (+ catalog join);
+ *   POST /hi-dsh/install    — one-click install (catalog-sourced, hot-mount);
+ *   POST /hi-dsh/uninstall  — remove a hi-dsh-installed package.
+ * Returns the route disposer. `getFeed()` returns the catalog feed
+ * ({plugins: [...]}) or null while the server-side catalog is unavailable.
  */
-export function registerInstallRoute({ host, profile, getFeed, logger }) {
-  let installing = false
+export function registerRoutes({ host, profile, getFeed, logger }) {
+  let busy = false
   let hotSequence = 0
-  return host.webServer.register({
-    kind: 'exact',
-    path: '/hi-dsh/install',
-    handler: async (request, response) => {
-      if (request.method !== 'POST') {
-        response.writeHead(405, { allow: 'POST' })
-        response.end()
-        return
-      }
-      if (!sameOrigin(request)) {
-        sendJson(response, 403, { error: 'untrusted origin' })
-        return
-      }
-      if (installing) {
-        sendJson(response, 409, { error: '另一个安装正在进行中，请等它完成后再试' })
-        return
-      }
-      installing = true
-      try {
-        const body = await readJsonBody(request)
-        const url = typeof body.url === 'string' ? body.url : ''
-        const feed = await getFeed()
-        if (feed === null || !Array.isArray(feed.plugins)) {
-          sendJson(response, 503, { error: '服务端目录未就绪，无法校验插件来源；请稍后重试（若持续失败，重启 dsh web）' })
+  const guardBusy = (response) => {
+    if (busy) {
+      sendJson(response, 409, { error: '另一个安装或卸载正在进行中，请等它完成后再试' })
+      return false
+    }
+    busy = true
+    return true
+  }
+  const dispose = [
+    host.webServer.register({
+      kind: 'exact',
+      path: '/hi-dsh/installed',
+      handler: async (request, response) => {
+        if (request.method !== 'GET') {
+          response.writeHead(405, { allow: 'GET' })
+          response.end()
           return
         }
-        // Curated-catalog check: the same trust boundary dsh-market draws.
-        const entry = feed.plugins.find((p) => typeof p.url === 'string' && p.url.toLowerCase() === url.toLowerCase())
-        if (entry === undefined) {
-          sendJson(response, 400, { error: '该插件不在目录中，拒绝安装' })
-          return
-        }
-        const target = installTargetFor(entry)
-        if (target === null) {
-          sendJson(response, 400, { error: '该插件没有可用的安装来源（npm / GitHub）' })
-          return
-        }
+        // Read-only: no same-origin gate here — the trust boundary lives on
+        // the mutating POSTs; a GET changes nothing.
         const dir = profileDirectory(profile)
-        const before = Object.keys(readInstalled(dir))
-        const result = await runDshPlugin(profile, ['add', target])
-        const ok = result.exitCode === 0 && !result.timedOut
-        let added = []
-        let already = false
-        let error
-        if (ok) {
-          added = Object.keys(readInstalled(dir)).filter((name) => !before.includes(name))
-          if (added.length === 0) {
-            // Clean exit that changed nothing: either the plugin was already
-            // installed (fine), or the install silently did nothing (a broken
-            // channel — report it instead of a fake success).
-            const slug = repoSlugOf(entry.url)
-            const match = Object.entries(readInstalled(dir)).find(([name, spec]) => {
-              if (typeof entry.npm === 'string' && name === entry.npm) return true
-              return slug !== null && String(spec).toLowerCase().includes(slug)
-            })
-            if (match !== undefined) {
-              already = true
-            } else {
-              ok = false
-              error = '安装命令报告成功，但 profile 没有任何变化——请在终端运行 `dsh plugin add` 验证，并把输出附到 github.com/hi-dsh/hi-dsh 反馈'
+        let deps
+        try {
+          deps = readInstalled(dir)
+        } catch (err) {
+          sendJson(response, 500, { error: `读取 profile 依赖失败（${dir}）：${err?.message ?? err}` })
+          return
+        }
+        let ledger
+        try {
+          ledger = readLedger(dir)
+        } catch (err) {
+          sendJson(response, 500, { error: `已安装账本无法读取（${ledgerPath(dir)}）：${err?.message ?? err}。删除该文件可重置记录，之后的安装会重新记账。` })
+          return
+        }
+        const rows = []
+        for (const [name, record] of Object.entries(ledger.installed)) {
+          if (!(name in deps)) continue
+          rows.push({
+            name,
+            spec: deps[name] ?? null,
+            version: installedVersion(dir, name),
+            source: record?.source ?? null,
+            at: record?.at ?? null,
+          })
+        }
+        // Catalog join is presentation, not substance: the local facts above
+        // stand alone, and an unreachable feed only drops the enrichment —
+        // reported to the client as feedReady:false, never silently omitted.
+        let feed = null
+        try {
+          feed = await getFeed()
+        } catch {
+          feed = null
+        }
+        const byNpm = new Map()
+        const bySlug = new Map()
+        for (const entry of Array.isArray(feed?.plugins) ? feed.plugins : []) {
+          if (typeof entry.npm === 'string' && !byNpm.has(entry.npm)) byNpm.set(entry.npm, entry)
+          const slug = repoSlugOf(entry.url)
+          if (slug !== null && !bySlug.has(slug)) bySlug.set(slug, entry)
+        }
+        for (const row of rows) {
+          const slug = repoSlugOf(row.source)
+          const entry = byNpm.get(row.name) ?? (slug !== null ? bySlug.get(slug) : undefined)
+          row.catalog = entry === undefined ? null : {
+            name: entry.name,
+            description: entry.description ?? null,
+            stars: entry.stars ?? null,
+            downloads: entry.downloads ?? null,
+            url: entry.url ?? null,
+          }
+        }
+        sendJson(response, 200, {
+          ok: true,
+          feedReady: feed !== null && Array.isArray(feed.plugins),
+          plugins: rows,
+        })
+      },
+    }),
+    host.webServer.register({
+      kind: 'exact',
+      path: '/hi-dsh/install',
+      handler: async (request, response) => {
+        if (request.method !== 'POST') {
+          response.writeHead(405, { allow: 'POST' })
+          response.end()
+          return
+        }
+        if (!sameOrigin(request)) {
+          sendJson(response, 403, { error: 'untrusted origin' })
+          return
+        }
+        if (!guardBusy(response)) return
+        try {
+          const body = await readJsonBody(request)
+          const url = typeof body.url === 'string' ? body.url : ''
+          const feed = await getFeed()
+          if (feed === null || !Array.isArray(feed.plugins)) {
+            sendJson(response, 503, { error: '服务端目录未就绪，无法校验插件来源；请稍后重试（若持续失败，重启 dsh web）' })
+            return
+          }
+          // Curated-catalog check: the same trust boundary dsh-market draws.
+          const entry = feed.plugins.find((p) => typeof p.url === 'string' && p.url.toLowerCase() === url.toLowerCase())
+          if (entry === undefined) {
+            sendJson(response, 400, { error: '该插件不在目录中，拒绝安装' })
+            return
+          }
+          const target = installTargetFor(entry)
+          if (target === null) {
+            sendJson(response, 400, { error: '该插件没有可用的安装来源（npm / GitHub）' })
+            return
+          }
+          const dir = profileDirectory(profile)
+          const before = Object.keys(readInstalled(dir))
+          const result = await runDshPlugin(profile, ['add', target])
+          const ok = result.exitCode === 0 && !result.timedOut
+          let added = []
+          let already = false
+          let error
+          if (ok) {
+            added = Object.keys(readInstalled(dir)).filter((name) => !before.includes(name))
+            if (added.length === 0) {
+              // Clean exit that changed nothing: either the plugin was already
+              // installed (fine), or the install silently did nothing (a broken
+              // channel — report it instead of a fake success).
+              const slug = repoSlugOf(entry.url)
+              const match = Object.entries(readInstalled(dir)).find(([name, spec]) => {
+                if (typeof entry.npm === 'string' && name === entry.npm) return true
+                return slug !== null && String(spec).toLowerCase().includes(slug)
+              })
+              if (match !== undefined) {
+                already = true
+              } else {
+                ok = false
+                error = '安装命令报告成功，但 profile 没有任何变化——请在终端运行 `dsh plugin add` 验证，并把输出附到 github.com/hi-dsh/hi-dsh 反馈'
+              }
+            }
+          } else {
+            error = `dsh plugin add 失败（exit ${result.exitCode}${result.timedOut ? '，超时' : ''}）`
+          }
+          let hot = false
+          const hotReasons = []
+          let ledgerError
+          if (ok && !already && added.length > 0) {
+            // Record provenance before hot-mounting: the install happened
+            // regardless of whether the hot-mount succeeds.
+            try {
+              recordInstalled(dir, added, { target, source: entry.url })
+            } catch (err) {
+              ledgerError = `记账失败（${err?.message ?? err}），该插件不会出现在已安装列表；重装一次可重建记录`
+            }
+            hot = true
+            for (const name of added) {
+              const mounted = await hotMount(host, dir, name, ++hotSequence)
+              if (!mounted.ok) {
+                hot = false
+                hotReasons.push(`${name}: ${mounted.reason}`)
+              }
             }
           }
-        } else {
-          error = `dsh plugin add 失败（exit ${result.exitCode}${result.timedOut ? '，超时' : ''}）`
-        }
-        let hot = false
-        const hotReasons = []
-        if (ok && !already && added.length > 0) {
-          hot = true
-          for (const name of added) {
-            const mounted = await hotMount(host, dir, name, ++hotSequence)
-            if (!mounted.ok) {
-              hot = false
-              hotReasons.push(`${name}: ${mounted.reason}`)
-            }
+          if (ledgerError !== undefined) logger?.warn?.('[hi-dsh] ledger write failed: %s', ledgerError)
+          const payload = {
+            ok,
+            target,
+            added,
+            already: already || undefined,
+            hot: hot || undefined,
+            hotReasons: hotReasons.length > 0 ? hotReasons : undefined,
+            ledgerError: ledgerError ?? undefined,
+            error: ok ? undefined : error,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut || undefined,
+            stdoutTail: tail(result.stdout),
+            stderrTail: tail(result.stderr),
           }
+          if (logger?.warn && !ok) {
+            logger.warn('[hi-dsh] install failed: %s — %s', target, tail(result.stderr || result.stdout, 300))
+          }
+          sendJson(response, ok ? 200 : 502, payload)
+        } catch (err) {
+          const message = err?.message ?? String(err)
+          logger?.warn?.('[hi-dsh] install route error: %s', message)
+          sendJson(response, 500, { error: message })
+        } finally {
+          busy = false
         }
-        const payload = {
-          ok,
-          target,
-          added,
-          already: already || undefined,
-          hot: hot || undefined,
-          hotReasons: hotReasons.length > 0 ? hotReasons : undefined,
-          error: ok ? undefined : error,
-          exitCode: result.exitCode,
-          timedOut: result.timedOut || undefined,
-          stdoutTail: tail(result.stdout),
-          stderrTail: tail(result.stderr),
+      },
+    }),
+    host.webServer.register({
+      kind: 'exact',
+      path: '/hi-dsh/uninstall',
+      handler: async (request, response) => {
+        if (request.method !== 'POST') {
+          response.writeHead(405, { allow: 'POST' })
+          response.end()
+          return
         }
-        if (logger?.warn && !ok) {
-          logger.warn('[hi-dsh] install failed: %s — %s', target, tail(result.stderr || result.stdout, 300))
+        if (!sameOrigin(request)) {
+          sendJson(response, 403, { error: 'untrusted origin' })
+          return
         }
-        sendJson(response, ok ? 200 : 502, payload)
-      } catch (err) {
-        const message = err?.message ?? String(err)
-        logger?.warn?.('[hi-dsh] install route error: %s', message)
-        sendJson(response, 500, { error: message })
-      } finally {
-        installing = false
-      }
-    },
-  })
+        if (!guardBusy(response)) return
+        try {
+          const body = await readJsonBody(request)
+          const name = typeof body.name === 'string' ? body.name.trim() : ''
+          if (!NPM_NAME_RE.test(name)) {
+            sendJson(response, 400, { error: '缺少或无效的插件包名' })
+            return
+          }
+          if (name === SELF_NAME) {
+            sendJson(response, 400, { error: `不能通过市场卸载 hi-dsh 自身；请在终端执行 dsh plugin --profile ${profile} remove ${SELF_NAME}` })
+            return
+          }
+          const dir = profileDirectory(profile)
+          let deps
+          try {
+            deps = readInstalled(dir)
+          } catch (err) {
+            sendJson(response, 500, { error: `读取 profile 依赖失败（${dir}）：${err?.message ?? err}` })
+            return
+          }
+          let ledger
+          try {
+            ledger = readLedger(dir)
+          } catch (err) {
+            sendJson(response, 500, { error: `已安装账本无法读取（${ledgerPath(dir)}）：${err?.message ?? err}。删除该文件可重置记录，之后的安装会重新记账。` })
+            return
+          }
+          if (!(name in ledger.installed)) {
+            sendJson(response, 400, { error: `该插件不是通过 hi-dsh 安装的（账本无记录）；请在终端执行 dsh plugin --profile ${profile} remove ${name} 管理` })
+            return
+          }
+          if (!(name in deps)) {
+            sendJson(response, 400, { error: '该插件已不在当前 profile 的依赖中，无需卸载' })
+            return
+          }
+          const result = await runDshPlugin(profile, ['remove', name])
+          const ok = result.exitCode === 0 && !result.timedOut
+          let error
+          if (!ok) {
+            error = `dsh plugin remove 失败（exit ${result.exitCode}${result.timedOut ? '，超时' : ''}）`
+          } else {
+            // Mirror the install route's honesty: a clean exit that left the
+            // dependency in place is a failure, not a success.
+            const after = readInstalled(dir)
+            if (name in after) {
+              error = '卸载命令报告成功，但依赖仍存在于 profile——请在终端运行 `dsh plugin remove` 验证，并把输出附到 github.com/hi-dsh/hi-dsh 反馈'
+              sendJson(response, 502, {
+                ok: false,
+                name,
+                error,
+                exitCode: result.exitCode,
+                stdoutTail: tail(result.stdout),
+                stderrTail: tail(result.stderr),
+              })
+              logger?.warn?.('[hi-dsh] uninstall left no change: %s', name)
+              return
+            }
+            recordRemoved(dir, name)
+          }
+          const payload = {
+            ok,
+            name,
+            restartRequired: ok || undefined,
+            error: ok ? undefined : error,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut || undefined,
+            stdoutTail: tail(result.stdout),
+            stderrTail: tail(result.stderr),
+          }
+          if (logger?.warn && !ok) {
+            logger.warn('[hi-dsh] uninstall failed: %s — %s', name, tail(result.stderr || result.stdout, 300))
+          }
+          sendJson(response, ok ? 200 : 502, payload)
+        } catch (err) {
+          const message = err?.message ?? String(err)
+          logger?.warn?.('[hi-dsh] uninstall route error: %s', message)
+          sendJson(response, 500, { error: message })
+        } finally {
+          busy = false
+        }
+      },
+    }),
+  ]
+  return () => {
+    for (const d of dispose) d()
+  }
 }

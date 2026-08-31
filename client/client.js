@@ -31,34 +31,7 @@ window.__ModuleLoader__.load({
 			return inflight;
 		}
 		//#endregion
-		//#region src/client/MarketPage.jsx
-		/**
-		* The hi-dsh market page: search / category filter / sort over the shared
-		* awesome-dsh-plugin catalog feed. Rendered identically in two seats:
-		*   - sidebar-aware overlay panel (opened by the Hi button) — no close button:
-		*     clicking anywhere in the host UI (sessions, workspaces, the Hi button
-		*     itself) dismisses it; Esc also works
-		*   - conversation.view tab ("插件市场") — embedded in the session view ring
-		*
-		* One-click install (mirrors dsh-market's flow): the card's 安装 button opens
-		* a confirm dialog; 确认安装 POSTs to /hi-dsh/install, which forwards to
-		* `dsh plugin add` on the host and hot-mounts the result. The card then
-		* reports the outcome inline — installed-and-live, restart-required, or the
-		* failure with the pnpm output tail.
-		*/
-		const PAGE_SIZE = 30;
-		const INSTALL_URL = "/hi-dsh/install";
-		function detectZh() {
-			try {
-				return (navigator.language || "zh-CN").toLowerCase().startsWith("zh");
-			} catch {
-				return true;
-			}
-		}
-		function formatCount(n) {
-			if (typeof n !== "number") return "·";
-			return n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
-		}
+		//#region src/client/styles.js
 		const s = {
 			page: {
 				display: "flex",
@@ -75,10 +48,34 @@ window.__ModuleLoader__.load({
 				padding: "12px 20px",
 				borderBottom: "1px solid light-dark(rgba(0,0,0,.1), rgba(255,255,255,.12))"
 			},
-			title: {
-				fontSize: 16,
+			tabs: {
+				display: "flex",
+				gap: 16,
+				alignItems: "baseline"
+			},
+			tabBtn: {
+				cursor: "pointer",
+				font: "inherit",
+				fontSize: 15,
+				fontWeight: 600,
+				lineHeight: 1.4,
+				padding: "2px 2px 6px",
+				border: "none",
+				borderBottom: "2px solid transparent",
+				background: "transparent",
+				color: "light-dark(#6b7280, #9aa0a6)"
+			},
+			tabBtnActive: {
+				cursor: "pointer",
+				font: "inherit",
+				fontSize: 15,
 				fontWeight: 700,
-				margin: 0
+				lineHeight: 1.4,
+				padding: "2px 2px 6px",
+				border: "none",
+				borderBottom: "2px solid light-dark(#2563eb, #7ab0ff)",
+				background: "transparent",
+				color: "inherit"
 			},
 			count: {
 				fontSize: 12,
@@ -201,7 +198,8 @@ window.__ModuleLoader__.load({
 			note: {
 				padding: "24px 20px",
 				fontSize: 13,
-				color: "light-dark(#6b7280, #9aa0a6)"
+				color: "light-dark(#6b7280, #9aa0a6)",
+				lineHeight: 1.7
 			},
 			sentinel: {
 				textAlign: "center",
@@ -325,15 +323,9 @@ window.__ModuleLoader__.load({
 				color: "light-dark(#ffffff, #dbe9ff)"
 			}
 		};
-		/**
-		* Install confirm dialog. Esc and a backdrop click cancel; 确认安装 proceeds.
-		* Esc is captured at document level so it closes only the dialog — not the
-		* market panel underneath (the host overlay listens for the same key) —
-		* regardless of where focus sits.
-		*/
-		function ConfirmDialog({ plugin, zh, onCancel, onConfirm }) {
-			const d = plugin.description;
-			const desc = typeof d === "string" ? d : d?.[zh ? "zh" : "en"] ?? d?.en ?? "";
+		//#endregion
+		//#region src/client/dialog.jsx
+		function ConfirmDialog({ title, name, source, desc, note, confirmLabel, onCancel, onConfirm }) {
 			(0, react.useEffect)(() => {
 				const onKey = (e) => {
 					if (e.key === "Escape") {
@@ -353,14 +345,185 @@ window.__ModuleLoader__.load({
 				role: "dialog",
 				"aria-modal": "true",
 				onClick: (e) => e.stopPropagation()
-			}, (0, react.createElement)("h2", { style: s.dialogTitle }, "安装插件"), (0, react.createElement)("div", { style: s.dialogName }, plugin.name), plugin.npm || plugin.url ? (0, react.createElement)("div", { style: s.dialogSource }, plugin.npm ?? plugin.url) : null, desc ? (0, react.createElement)("div", { style: s.dialogDesc }, desc) : null, (0, react.createElement)("div", { style: s.dialogNote }, "将把该插件安装到当前 dsh profile；多数插件安装后立即可用，部分需要重启 dsh web 后生效。"), (0, react.createElement)("div", { style: s.dialogActions }, (0, react.createElement)("button", {
+			}, (0, react.createElement)("h2", { style: s.dialogTitle }, title), (0, react.createElement)("div", { style: s.dialogName }, name), source ? (0, react.createElement)("div", { style: s.dialogSource }, source) : null, desc ? (0, react.createElement)("div", { style: s.dialogDesc }, desc) : null, note ? (0, react.createElement)("div", { style: s.dialogNote }, note) : null, (0, react.createElement)("div", { style: s.dialogActions }, (0, react.createElement)("button", {
 				style: s.ghostBtn,
 				onClick: onCancel
 			}, "取消"), (0, react.createElement)("button", {
 				style: s.primaryBtn,
 				onClick: onConfirm,
 				autoFocus: true
-			}, "确认安装"))));
+			}, confirmLabel))));
+		}
+		//#endregion
+		//#region src/client/InstalledPage.jsx
+		/**
+		* The 已安装插件 tab: packages the hi-dsh ledger recorded as installed through
+		* this market (GET /hi-dsh/installed). The ledger only adds provenance — the
+		* profile's dependency table stays the fact source, so the server answers
+		* with ledger ∩ dependencies and a package removed out-of-band (e.g. a
+		* terminal `dsh plugin remove`) simply stops appearing here.
+		*
+		* Uninstall (POST /hi-dsh/uninstall → `dsh plugin remove` on the host):
+		* confirm dialog → inline outcome with the pnpm tail; the removal lands in
+		* the profile immediately but the running process keeps the old layers until
+		* restart, and the dialog says so — no fake instant-unmount.
+		*/
+		const INSTALLED_URL = "/hi-dsh/installed";
+		const UNINSTALL_URL = "/hi-dsh/uninstall";
+		function descriptionText(description, zh) {
+			if (typeof description === "string") return description;
+			return description?.[zh ? "zh" : "en"] ?? description?.en ?? "";
+		}
+		function installedDate(iso) {
+			const d = new Date(iso);
+			return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+		}
+		function InstalledPage() {
+			const [zh] = (0, react.useState)(() => (navigator.language || "zh-CN").toLowerCase().startsWith("zh"));
+			const [rows, setRows] = (0, react.useState)(null);
+			const [feedReady, setFeedReady] = (0, react.useState)(true);
+			const [error, setError] = (0, react.useState)(null);
+			const [confirmRow, setConfirmRow] = (0, react.useState)(null);
+			const [busyName, setBusyName] = (0, react.useState)(null);
+			const [outcome, setOutcome] = (0, react.useState)(null);
+			const load = () => {
+				setError(null);
+				fetch(INSTALLED_URL).then(async (res) => {
+					const body = await res.json().catch(() => ({}));
+					if (!res.ok || body?.ok !== true) throw new Error(body?.error ?? `HTTP ${res.status}`);
+					setRows(Array.isArray(body.plugins) ? body.plugins : []);
+					setFeedReady(body.feedReady !== false);
+				}).catch((err) => setError(err?.message ?? String(err)));
+			};
+			(0, react.useEffect)(() => {
+				load();
+			}, []);
+			const runUninstall = async (row) => {
+				setBusyName(row.name);
+				setOutcome(null);
+				try {
+					const res = await fetch(UNINSTALL_URL, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ name: row.name })
+					});
+					const body = await res.json().catch(() => ({}));
+					if (res.ok && body?.ok === true) {
+						setOutcome({
+							ok: true,
+							name: row.name,
+							message: `已从 profile 移除 ${row.name}，重启 dsh web 后完全停用`,
+							tails: ""
+						});
+						setRows((prev) => (prev ?? []).filter((r) => r.name !== row.name));
+					} else setOutcome({
+						ok: false,
+						name: row.name,
+						message: body?.error ?? `卸载失败（HTTP ${res.status}）`,
+						tails: [body?.stderrTail, body?.stdoutTail].filter(Boolean).join("\n")
+					});
+				} catch (err) {
+					setOutcome({
+						ok: false,
+						name: row.name,
+						message: `无法连接卸载服务：${err?.message ?? err}`,
+						tails: ""
+					});
+				} finally {
+					setBusyName(null);
+				}
+			};
+			if (error !== null) return (0, react.createElement)("div", { style: s.list }, (0, react.createElement)("div", { style: s.note }, `已安装列表加载失败：${error}`, (0, react.createElement)("button", {
+				style: s.retry,
+				onClick: load
+			}, "重试")));
+			if (rows === null) return (0, react.createElement)("div", { style: s.list }, (0, react.createElement)("div", { style: s.note }, "正在读取已安装列表…"));
+			return (0, react.createElement)("div", { style: s.list }, rows.length === 0 ? (0, react.createElement)("div", { style: s.note }, "还没有通过 hi-dsh 安装的插件。", (0, react.createElement)("div", null, "到「插件市场」标签页安装第一个插件，安装成功后会出现在这里。")) : [!feedReady ? (0, react.createElement)("div", {
+				key: "feed-note",
+				style: s.status
+			}, "目录 feed 暂不可用，仅显示本地记录信息。") : null, ...rows.map((row) => {
+				const d = row.catalog ? descriptionText(row.catalog.description, zh) : "";
+				const date = installedDate(row.at);
+				const busy = busyName === row.name;
+				const outcomeHere = outcome?.name === row.name ? outcome : null;
+				return (0, react.createElement)("div", {
+					key: row.name,
+					style: s.card
+				}, (0, react.createElement)("div", { style: s.cardHead }, (0, react.createElement)("span", { style: s.name }, row.catalog?.name ?? row.name), (0, react.createElement)("span", { style: s.npm }, row.name), (0, react.createElement)("span", { style: s.meta }, date ? `安装于 ${date}` : "")), d ? (0, react.createElement)("div", { style: s.desc }, d) : null, (0, react.createElement)("div", { style: s.cardFoot }, (0, react.createElement)("span", { style: s.pill }, row.version ? `v${row.version}` : "版本未知"), (0, react.createElement)("span", { style: s.npm }, row.spec ?? ""), row.source ? (0, react.createElement)("a", {
+					href: row.source,
+					target: "_blank",
+					rel: "noreferrer",
+					style: {
+						...s.pill,
+						color: "inherit"
+					}
+				}, "GitHub ↗") : null, (0, react.createElement)("button", {
+					style: busy ? {
+						...s.installBtn,
+						opacity: .6,
+						cursor: "default"
+					} : s.installBtn,
+					disabled: busy || busyName !== null,
+					onClick: () => setConfirmRow(row),
+					title: "从当前 dsh profile 移除该插件"
+				}, busy ? "卸载中…" : "卸载")), outcomeHere ? outcomeHere.ok ? (0, react.createElement)("div", { style: s.statusOk }, `✓ ${outcomeHere.message}`) : (0, react.createElement)("div", { style: s.statusErr }, `✕ ${outcomeHere.message}`) : null, outcomeHere && !outcomeHere.ok && outcomeHere.tails ? (0, react.createElement)("pre", { style: s.tails }, outcomeHere.tails) : null);
+			})], confirmRow ? (0, react.createElement)(ConfirmDialog, {
+				title: "卸载插件",
+				name: confirmRow.catalog?.name ?? confirmRow.name,
+				source: confirmRow.spec ?? confirmRow.name,
+				desc: confirmRow.catalog ? descriptionText(confirmRow.catalog.description, zh) : "",
+				note: "将从当前 dsh profile 移除该插件的依赖与层栈记录；当前进程内它仍会运行，重启 dsh web 后完全停用。",
+				confirmLabel: "确认卸载",
+				onCancel: () => setConfirmRow(null),
+				onConfirm: () => {
+					const row = confirmRow;
+					setConfirmRow(null);
+					runUninstall(row);
+				}
+			}) : null);
+		}
+		//#endregion
+		//#region src/client/MarketPage.jsx
+		/**
+		* The hi-dsh page, rendered identically in two seats — the sidebar-aware
+		* overlay panel (opened by the Hi button) and the conversation.view tab —
+		* with two tabs:
+		*   - 插件市场   search / category filter / sort over the shared
+		*     awesome-dsh-plugin catalog feed; one-click install (mirrors dsh-market's
+		*     flow: 安装 → confirm → POST /hi-dsh/install → `dsh plugin add` +
+		*     hot-mount, outcome reported inline)
+		*   - 已安装插件  packages the ledger recorded as installed through this
+		*     market, with uninstall (see InstalledPage)
+		*/
+		const PAGE_SIZE = 30;
+		const INSTALL_URL = "/hi-dsh/install";
+		function detectZh() {
+			try {
+				return (navigator.language || "zh-CN").toLowerCase().startsWith("zh");
+			} catch {
+				return true;
+			}
+		}
+		function formatCount(n) {
+			if (typeof n !== "number") return "·";
+			return n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n);
+		}
+		/**
+		* Install confirm dialog. Esc and a backdrop click cancel; 确认安装 proceeds.
+		*/
+		function ConfirmInstallDialog({ plugin, zh, onCancel, onConfirm }) {
+			const d = plugin.description;
+			const desc = typeof d === "string" ? d : d?.[zh ? "zh" : "en"] ?? d?.en ?? "";
+			return (0, react.createElement)(ConfirmDialog, {
+				title: "安装插件",
+				name: plugin.name,
+				source: plugin.npm || plugin.url ? plugin.npm ?? plugin.url : "",
+				desc,
+				note: "将把该插件安装到当前 dsh profile；多数插件安装后立即可用，部分需要重启 dsh web 后生效。",
+				confirmLabel: "确认安装",
+				onCancel,
+				onConfirm
+			});
 		}
 		function PluginCard({ plugin, zh }) {
 			const [phase, setPhase] = (0, react.useState)("idle");
@@ -379,7 +542,8 @@ window.__ModuleLoader__.load({
 					});
 					const body = await res.json().catch(() => ({}));
 					if (res.ok && body?.ok === true) {
-						const message = body.already ? "该插件已在本 profile 中，未发生变化" : body.hot ? `已安装并生效：${body.added.join("、")}` : `已安装（${body.added.join("、")}），重启 dsh web 后生效${Array.isArray(body.hotReasons) && body.hotReasons.length > 0 ? ` — ${body.hotReasons.join("；")}` : ""}`;
+						const ledgerNote = body.ledgerError ? ` — 注意：${body.ledgerError}` : "";
+						const message = body.already ? "该插件已在本 profile 中，未发生变化" : body.hot ? `已安装并生效：${body.added.join("、")}${ledgerNote}` : `已安装（${body.added.join("、")}），重启 dsh web 后生效${Array.isArray(body.hotReasons) && body.hotReasons.length > 0 ? ` — ${body.hotReasons.join("；")}` : ""}${ledgerNote}`;
 						setOutcome({
 							ok: true,
 							message
@@ -422,7 +586,7 @@ window.__ModuleLoader__.load({
 					...s.pill,
 					color: "inherit"
 				}
-			}, "GitHub ↗") : null), phase === "installing" ? (0, react.createElement)("div", { style: s.status }, "正在安装（pnpm 可能需要下载依赖，请稍候）…") : null, phase === "done" && outcome ? (0, react.createElement)("div", { style: s.statusOk }, `✓ ${outcome.message}`) : null, phase === "error" && outcome ? (0, react.createElement)("div", { style: s.statusErr }, `✕ ${outcome.message}`) : null, phase === "error" && outcome && outputTail ? (0, react.createElement)("pre", { style: s.tails }, outputTail) : null, phase === "confirm" ? (0, react.createElement)(ConfirmDialog, {
+			}, "GitHub ↗") : null), phase === "installing" ? (0, react.createElement)("div", { style: s.status }, "正在安装（pnpm 可能需要下载依赖，请稍候）…") : null, phase === "done" && outcome ? (0, react.createElement)("div", { style: s.statusOk }, `✓ ${outcome.message}`) : null, phase === "error" && outcome ? (0, react.createElement)("div", { style: s.statusErr }, `✕ ${outcome.message}`) : null, phase === "error" && outcome && outputTail ? (0, react.createElement)("pre", { style: s.tails }, outputTail) : null, phase === "confirm" ? (0, react.createElement)(ConfirmInstallDialog, {
 				plugin,
 				zh,
 				onCancel: () => setPhase("idle"),
@@ -431,6 +595,7 @@ window.__ModuleLoader__.load({
 		}
 		function MarketPage({ onClose } = {}) {
 			const zh = (0, react.useMemo)(detectZh, []);
+			const [tab, setTab] = (0, react.useState)("market");
 			const [state, setState] = (0, react.useState)({
 				status: "loading",
 				feed: null,
@@ -511,11 +676,17 @@ window.__ModuleLoader__.load({
 				if (!c) return id;
 				return zh ? c.zh ?? c.en ?? id : c.en ?? c.zh ?? id;
 			};
-			return (0, react.createElement)("div", { style: s.page }, (0, react.createElement)("div", { style: s.header }, (0, react.createElement)("h1", { style: s.title }, "插件市场"), state.status === "ready" ? (0, react.createElement)("span", { style: s.count }, `${filtered.length} / ${plugins.length} 个插件 · 数据更新于 ${state.feed?.updated ?? "未知"}`) : null, onClose ? (0, react.createElement)("button", {
+			return (0, react.createElement)("div", { style: s.page }, (0, react.createElement)("div", { style: s.header }, (0, react.createElement)("div", { style: s.tabs }, (0, react.createElement)("button", {
+				style: tab === "market" ? s.tabBtnActive : s.tabBtn,
+				onClick: () => setTab("market")
+			}, "插件市场"), (0, react.createElement)("button", {
+				style: tab === "installed" ? s.tabBtnActive : s.tabBtn,
+				onClick: () => setTab("installed")
+			}, "已安装插件")), tab === "market" && state.status === "ready" ? (0, react.createElement)("span", { style: s.count }, `${filtered.length} / ${plugins.length} 个插件 · 数据更新于 ${state.feed?.updated ?? "未知"}`) : null, onClose ? (0, react.createElement)("button", {
 				style: s.close,
 				onClick: onClose,
 				title: "关闭 (Esc)"
-			}, "关闭 ✕") : null), (0, react.createElement)("div", { style: s.toolbar }, (0, react.createElement)("input", {
+			}, "关闭 ✕") : null), tab === "installed" ? (0, react.createElement)(InstalledPage) : [(0, react.createElement)("div", { style: s.toolbar }, (0, react.createElement)("input", {
 				style: s.input,
 				value: search,
 				placeholder: "搜索插件（名称 / 描述）…",
@@ -546,7 +717,7 @@ window.__ModuleLoader__.load({
 				key: "sentinel",
 				ref: sentinelRef,
 				style: s.sentinel
-			}, `↓ 继续滚动加载（还有 ${filtered.length - visible} 个）`) : null]));
+			}, `↓ 继续滚动加载（还有 ${filtered.length - visible} 个）`) : null])]);
 		}
 		//#endregion
 		//#region src/client/state.js

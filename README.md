@@ -7,7 +7,7 @@
 `Marketplace` Cordis 服务，供 profile 的其他表面（命令、Web UI、agent 工具）读取和扩展；
 同时通过 `"dsh": { "client": … }` 声明把自己的 web 界面注入 dsh web。
 
-> **状态：v0.3 —— 一键安装。** 逛、搜、筛选、一键安装可用。英文版文档等版本稳定后再补。
+> **状态：v0.4 —— 已安装管理。** 逛、搜、筛选、一键安装、已安装列表与卸载可用。英文版文档等版本稳定后再补。
 
 ## 目前的能力
 
@@ -32,7 +32,20 @@
   - 实际执行 `dsh plugin --profile <name> add <target>`（profile 取宿主进程的
     `--profile` 参数），安装成功后尝试**热挂载**（Include 子树，运行时即刻生效）；
     不支持热挂载的插件如实回报「重启 dsh web 后生效」及原因；
-  - 失败时卡片内展示错误与 pnpm 输出尾部；一次只允许一个安装（并发请求 409）。
+  - 失败时卡片内展示错误与 pnpm 输出尾部；安装与卸载共享单飞锁（并发请求 409）。
+- **「已安装插件」标签页 + 一键卸载**（市场面板与会话标签页各有两个标签：插件市场 / 已安装插件）：
+  - 安装来源**记账**：`dsh plugin` / pnpm 不记录"是谁装的"，所以安装路由在成功后把
+    "通过 hi-dsh 安装"这一事实写入 `~/.dsh/profiles/<name>/hi-dsh.json`（每次写入
+    都按当前依赖表修剪，依赖表始终是事实源）；
+  - 已安装列表 = **账本 ∩ profile 依赖**（`GET /hi-dsh/installed`）：终端、其它市场
+    装的以及 dsh 自带的框架层不会出现；功能上线前的历史安装无法追认，重装一次即可入账；
+  - 列表项显示实际版本（读 `node_modules/<pkg>/package.json`）、依赖 spec、安装日期，
+    能对上目录 feed 时附简介与热度（feed 不可用时如实标注，仅显示本地信息）；
+  - 卸载：确认框 → `POST /hi-dsh/uninstall` → `dsh plugin --profile <name> remove <pkg>`，
+    成功后删除账本条目并从列表移除；当前进程内插件仍会运行，如实提示"重启 dsh web 后
+    完全停用"；pnpm 报告成功但依赖仍在时按失败处理（不伪造成功）；
+  - 边界：只允许卸载账本记录的包（终端装的请用命令行管理）；拒绝在市场内卸载 hi-dsh 自身；
+    账本损坏时返回可行动的错误（500），不装作空列表。
 - 注册 **`/hi-dsh`** 斜杠命令，汇报目录 feed 状态（来源、数量、更新日期）。
 - 启动时打印日志，确认 bundle 激活与 feed 加载结果。
 
@@ -75,10 +88,13 @@ dsh --profile web --dump-config
 | --- | --- |
 | `package.json` | 包清单 + `dsh.bundle.patch` 与 `dsh.client` 声明。 |
 | `cordis.patch.yml` | 插入 `hi-dsh` 行的 bundle 补丁层。 |
-| `src/index.js` | Cordis 插件：`Marketplace` 服务（feed 拉取）+ `/hi-dsh` 命令 + 安装路由挂载。 |
-| `src/install.js` | 一键安装：`/hi-dsh/install` 路由、`dsh plugin add` 转发、Include 热挂载。 |
+| `src/index.js` | Cordis 插件：`Marketplace` 服务（feed 拉取）+ `/hi-dsh` 命令 + 路由挂载。 |
+| `src/install.js` | 三个 HTTP 路由（已安装列表 / 安装 / 卸载）、`dsh plugin` 转发、Include 热挂载、安装来源账本。 |
 | `src/client/index.jsx` | 客户端入口：Hi 按钮 / 全屏市场页 / 会话标签页三个插槽注册。 |
-| `src/client/MarketPage.jsx` | 市场界面：搜索、分类筛选、排序、安装确认框与安装流程。 |
+| `src/client/MarketPage.jsx` | 市场界面：两个标签页（插件市场 / 已安装插件）、搜索、分类筛选、排序、安装确认框与安装流程。 |
+| `src/client/InstalledPage.jsx` | 已安装列表：账本 ∩ 依赖的展示、卸载确认与卸载流程。 |
+| `src/client/dialog.jsx` | 安装 / 卸载共用的确认对话框。 |
+| `src/client/styles.js` | 客户端共享内联样式。 |
 | `src/client/feed.js` | 目录 feed 拉取与页内缓存。 |
 | `tsdown.config.js` | 客户端工厂包构建（`window.__ModuleLoader__.load` 包装）。 |
 | `client/client.js` | 构建产物，宿主 web 端加载（连 `.map` 一起提交，便于调试）。 |

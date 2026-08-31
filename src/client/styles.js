@@ -1,0 +1,110 @@
+// Shared inline styles for the hi-dsh client surfaces (market page, installed
+// tab, dialogs). One object so both tabs and both seats render identically;
+// colors go through light-dark() — no theme detection anywhere.
+
+export const s = {
+  page: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, colorScheme: 'light dark', font: 'inherit' },
+  header: {
+    display: 'flex', alignItems: 'center', gap: 10, padding: '12px 20px',
+    borderBottom: '1px solid light-dark(rgba(0,0,0,.1), rgba(255,255,255,.12))',
+  },
+  tabs: { display: 'flex', gap: 16, alignItems: 'baseline' },
+  tabBtn: {
+    cursor: 'pointer', font: 'inherit', fontSize: 15, fontWeight: 600, lineHeight: 1.4,
+    padding: '2px 2px 6px', border: 'none', borderBottom: '2px solid transparent',
+    background: 'transparent', color: 'light-dark(#6b7280, #9aa0a6)',
+  },
+  tabBtnActive: {
+    cursor: 'pointer', font: 'inherit', fontSize: 15, fontWeight: 700, lineHeight: 1.4,
+    padding: '2px 2px 6px', border: 'none', borderBottom: '2px solid light-dark(#2563eb, #7ab0ff)',
+    background: 'transparent', color: 'inherit',
+  },
+  count: { fontSize: 12, color: 'light-dark(#6b7280, #9aa0a6)' },
+  close: {
+    marginLeft: 'auto', cursor: 'pointer', font: 'inherit', fontSize: 13, lineHeight: 1,
+    padding: '6px 10px', borderRadius: 8, border: '1px solid light-dark(rgba(0,0,0,.15), rgba(255,255,255,.2))',
+    background: 'transparent', color: 'inherit',
+  },
+  toolbar: { display: 'flex', gap: 8, padding: '10px 20px', flexWrap: 'wrap', alignItems: 'center' },
+  input: {
+    flex: '1 1 220px', font: 'inherit', fontSize: 13, color: 'inherit', padding: '7px 10px',
+    borderRadius: 8, border: '1px solid light-dark(rgba(0,0,0,.18), rgba(255,255,255,.24))',
+    background: 'transparent', outline: 'none',
+  },
+  select: {
+    font: 'inherit', fontSize: 13, color: 'inherit', padding: '7px 8px', borderRadius: 8,
+    border: '1px solid light-dark(rgba(0,0,0,.18), rgba(255,255,255,.24))',
+    background: 'transparent',
+  },
+  list: { flex: 1, overflow: 'auto', padding: '2px 20px 28px', minHeight: 0 },
+  card: {
+    border: '1px solid light-dark(rgba(0,0,0,.12), rgba(255,255,255,.14))',
+    borderRadius: 10, padding: '12px 14px', marginBottom: 10,
+  },
+  cardHead: { display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' },
+  name: { fontSize: 14, fontWeight: 650 },
+  npm: { fontSize: 11, color: 'light-dark(#6b7280, #9aa0a6)', fontFamily: 'ui-monospace, monospace' },
+  meta: { marginLeft: 'auto', fontSize: 12, color: 'light-dark(#6b7280, #9aa0a6)', whiteSpace: 'nowrap' },
+  desc: { fontSize: 13, lineHeight: 1.55, marginTop: 6, color: 'light-dark(#374151, #c5c9cf)' },
+  cardFoot: { display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' },
+  pill: {
+    fontSize: 11, padding: '2px 8px', borderRadius: 999,
+    border: '1px solid light-dark(rgba(0,0,0,.14), rgba(255,255,255,.18))',
+    color: 'light-dark(#6b7280, #9aa0a6)',
+  },
+  installBtn: {
+    cursor: 'pointer', font: 'inherit', fontSize: 12, padding: '4px 16px', borderRadius: 8,
+    border: '1px solid light-dark(rgba(0,0,0,.18), rgba(255,255,255,.24))',
+    background: 'transparent', color: 'inherit',
+  },
+  moreBtn: {
+    display: 'block', margin: '14px auto 4px', cursor: 'pointer', font: 'inherit', fontSize: 13,
+    padding: '8px 18px', borderRadius: 8,
+    border: '1px solid light-dark(rgba(0,0,0,.18), rgba(255,255,255,.24))',
+    background: 'transparent', color: 'inherit',
+  },
+  note: { padding: '24px 20px', fontSize: 13, color: 'light-dark(#6b7280, #9aa0a6)', lineHeight: 1.7 },
+  sentinel: { textAlign: 'center', padding: '14px 0 6px', fontSize: 12, color: 'light-dark(#9aa0a6, #6b7280)' },
+  retry: { marginLeft: 10, cursor: 'pointer', font: 'inherit', fontSize: 13, padding: '4px 12px', borderRadius: 8, border: '1px solid currentColor', background: 'transparent', color: 'inherit' },
+  status: { marginTop: 6, fontSize: 12, color: 'light-dark(#6b7280, #9aa0a6)' },
+  statusOk: { marginTop: 6, fontSize: 12, color: 'light-dark(#15803d, #86efac)' },
+  statusErr: { marginTop: 6, fontSize: 12, color: 'light-dark(#b91c1c, #fca5a5)' },
+  tails: {
+    margin: '6px 0 0', fontSize: 11, lineHeight: 1.5, fontFamily: 'ui-monospace, monospace',
+    padding: '8px 10px', borderRadius: 6, maxHeight: 160, overflow: 'auto',
+    whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+    background: 'light-dark(rgba(0,0,0,.05), rgba(255,255,255,.07))',
+    color: 'light-dark(#7f1d1d, #fca5a5)',
+  },
+  overlay: {
+    position: 'fixed', inset: 0, zIndex: 1100, display: 'grid', placeItems: 'center',
+    background: 'rgba(0,0,0,.35)',
+  },
+  dialog: {
+    width: 'min(480px, calc(100vw - 48px))', maxHeight: 'calc(100vh - 96px)', overflow: 'auto',
+    borderRadius: 12, padding: '18px 20px',
+    background: 'light-dark(#ffffff, #26282e)', color: 'light-dark(#1f2328, #e8eaed)',
+    colorScheme: 'light dark',
+    border: '1px solid light-dark(rgba(0,0,0,.12), rgba(255,255,255,.14))',
+    boxShadow: '0 18px 48px rgba(0,0,0,.25)',
+  },
+  dialogTitle: { fontSize: 15, fontWeight: 700, margin: 0 },
+  dialogName: { fontSize: 14, fontWeight: 650, marginTop: 10 },
+  dialogSource: {
+    fontSize: 11, fontFamily: 'ui-monospace, monospace', marginTop: 2,
+    color: 'light-dark(#6b7280, #9aa0a6)', overflowWrap: 'anywhere',
+  },
+  dialogDesc: { fontSize: 13, lineHeight: 1.55, marginTop: 10, color: 'light-dark(#374151, #c5c9cf)' },
+  dialogNote: { fontSize: 12, lineHeight: 1.6, marginTop: 10, color: 'light-dark(#6b7280, #9aa0a6)' },
+  dialogActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 },
+  ghostBtn: {
+    cursor: 'pointer', font: 'inherit', fontSize: 13, padding: '7px 14px', borderRadius: 8,
+    border: '1px solid light-dark(rgba(0,0,0,.18), rgba(255,255,255,.24))',
+    background: 'transparent', color: 'inherit',
+  },
+  primaryBtn: {
+    cursor: 'pointer', font: 'inherit', fontSize: 13, padding: '7px 16px', borderRadius: 8,
+    border: '1px solid light-dark(#2563eb, #7ab0ff)',
+    background: 'light-dark(#2563eb, rgba(122,176,255,.25))', color: 'light-dark(#ffffff, #dbe9ff)',
+  },
+}
