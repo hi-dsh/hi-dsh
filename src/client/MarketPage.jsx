@@ -1,14 +1,16 @@
 /**
  * The hi-dsh market page: search / category filter / sort over the shared
  * awesome-dsh-plugin catalog feed. Rendered identically in two seats:
- *   - fullscreen overlay (opened by the sidebar Hi button) — gets a close ✕
- *   - conversation.view tab ("插件市场") — embedded mode, no close button
+ *   - sidebar-aware overlay panel (opened by the Hi button) — no close button:
+ *     clicking anywhere in the host UI (sessions, workspaces, the Hi button
+ *     itself) dismisses it; Esc also works
+ *   - conversation.view tab ("插件市场") — embedded in the session view ring
  *
  * v1 is read-only: browse, search, and copy an install command. The actual
  * install action (forward to `dsh plugin --profile <name> add <pkg>`) is the
  * next milestone.
  */
-import { createElement as h, useEffect, useMemo, useState } from 'react'
+import { createElement as h, useEffect, useMemo, useRef, useState } from 'react'
 import { loadFeed } from './feed.js'
 
 const PAGE_SIZE = 30
@@ -107,6 +109,7 @@ const s = {
     background: 'transparent', color: 'inherit',
   },
   note: { padding: '24px 20px', fontSize: 13, color: 'light-dark(#6b7280, #9aa0a6)' },
+  sentinel: { textAlign: 'center', padding: '14px 0 6px', fontSize: 12, color: 'light-dark(#9aa0a6, #6b7280)' },
   retry: { marginLeft: 10, cursor: 'pointer', font: 'inherit', fontSize: 13, padding: '4px 12px', borderRadius: 8, border: '1px solid currentColor', background: 'transparent', color: 'inherit' },
 }
 
@@ -138,13 +141,14 @@ function PluginCard({ plugin, zh }) {
   )
 }
 
-export function MarketPage({ embedded = false, onClose } = {}) {
+export function MarketPage({ onClose } = {}) {
   const zh = useMemo(detectZh, [])
   const [state, setState] = useState({ status: 'loading', feed: null, error: null })
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('all')
   const [sort, setSort] = useState('hot')
   const [visible, setVisible] = useState(PAGE_SIZE)
+  const sentinelRef = useRef(null)
 
   const load = (force = false) => {
     setState((prev) => ({ ...prev, status: 'loading', error: null }))
@@ -181,6 +185,22 @@ export function MarketPage({ embedded = false, onClose } = {}) {
   // Reset the render window whenever the filter changes.
   useEffect(() => { setVisible(PAGE_SIZE) }, [search, category, sort])
 
+  // Infinite scroll: when the sentinel nears the viewport bottom, grow the
+  // render window by one page. IntersectionObserver avoids scroll-event
+  // spam entirely; the click button stays as the fallback for hosts without it.
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return undefined
+    const el = sentinelRef.current
+    if (!el || filtered.length <= visible) return undefined
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisible((v) => Math.min(v + PAGE_SIZE, filtered.length))
+      }
+    }, { rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [filtered.length, visible])
+
   const catLabel = (id) => {
     const c = categories[id]
     if (!c) return id
@@ -193,7 +213,7 @@ export function MarketPage({ embedded = false, onClose } = {}) {
       state.status === 'ready'
         ? h('span', { style: s.count }, `${filtered.length} / ${plugins.length} 个插件 · 数据更新于 ${state.feed?.updated ?? '未知'}`)
         : null,
-      !embedded ? h('button', { style: s.close, onClick: onClose, title: '关闭 (Esc)' }, '关闭 ✕') : null,
+      onClose ? h('button', { style: s.close, onClick: onClose, title: '关闭 (Esc)' }, '关闭 ✕') : null,
     ),
     h('div', { style: s.toolbar },
       h('input', {
@@ -222,8 +242,11 @@ export function MarketPage({ embedded = false, onClose } = {}) {
             : [
                 ...filtered.slice(0, visible).map((p) => h(PluginCard, { key: `${p.owner}/${p.name}`, plugin: p, zh })),
                 filtered.length > visible
-                  ? h('button', { key: 'more', style: s.moreBtn, onClick: () => setVisible((v) => v + PAGE_SIZE) },
-                      `加载更多（还有 ${filtered.length - visible} 个）`)
+                  ? typeof IntersectionObserver === 'undefined'
+                    ? h('button', { key: 'more', style: s.moreBtn, onClick: () => setVisible((v) => v + PAGE_SIZE) },
+                        `加载更多（还有 ${filtered.length - visible} 个）`)
+                    : h('div', { key: 'sentinel', ref: sentinelRef, style: s.sentinel },
+                        `↓ 继续滚动加载（还有 ${filtered.length - visible} 个）`)
                   : null,
               ],
     ),

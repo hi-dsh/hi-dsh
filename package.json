@@ -1,6 +1,6 @@
 {
   "name": "hi-dsh",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "hi-dsh: a dsh plugin marketplace — discover, catalog, and install dsh plugins.",
   "type": "module",
   "main": "src/index.js",
