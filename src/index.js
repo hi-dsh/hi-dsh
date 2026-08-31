@@ -1,4 +1,5 @@
 import { Service } from '@deepseek-ai/cordis'
+import { argvProfile, cleanHotDir, profileDirectory, registerInstallRoute } from './install.js'
 
 const NAME = 'hi-dsh'
 const SERVICE = 'marketplace'
@@ -29,8 +30,10 @@ function entryText(entry) {
  * boot into memory; a failed fetch degrades to the static `config.catalog`
  * and is surfaced through status() instead of throwing.
  *
- * Next milestones: install (forward to `dsh plugin --profile <name> add`),
- * enable/disable via the patch layer, update checks.
+ * One-click install: on hosts with a webServer (web profile), a same-origin
+ * POST /hi-dsh/install route forwards to `dsh plugin --profile <name> add`
+ * and hot-mounts what it added (see install.js). Other profiles keep the
+ * read-only service + command.
  */
 export class Marketplace extends Service {
   constructor(ctx, config = {}) {
@@ -124,6 +127,34 @@ export async function hiDsh(ctx, config = {}) {
     name: 'hi-dsh',
     description: 'hi-dsh 插件市场状态',
     handler: hiDshCommandHandler,
+  })
+  // One-click install needs the host webServer (web profile). Injecting it
+  // here — instead of declaring it on the plugin — keeps the command and the
+  // marketplace service alive on hosts without one (headless / tui).
+  ctx.inject(['webServer'], (host) => {
+    const profile = config.profile ?? argvProfile() ?? 'web'
+    cleanHotDir(profileDirectory(profile))
+    host.effect(() => registerInstallRoute({
+      host,
+      profile,
+      // Server-side trust check: the route must verify the source against
+      // this host's own catalog, not the browser's copy. If the boot fetch
+      // failed, refresh once on demand — a stale "not ready" must not turn
+      // every install into a dead end.
+      //
+      // Request-time service access must go through ctx.get(): the handler
+      // runs outside hi-dsh's fiber, and plain property access is refused by
+      // the host's inject guard (marketplace is a service hi-dsh itself
+      // provides, so it cannot be declared on inject either). Same pattern
+      // dsh-market uses for its agents lookup. A missing service maps to the
+      // route's honest "目录未就绪" answer.
+      getFeed: async () => {
+        const marketplace = ctx.get('marketplace')
+        if (marketplace?.feed === null) await marketplace.refreshFeed()
+        return marketplace?.feed ?? null
+      },
+      logger: ctx.logger,
+    }), 'hi-dsh: install route')
   })
   ctx.logger.info('[%s] marketplace mounted (feed: %s)', NAME, config.feedUrl ?? FEED_URL)
 }
