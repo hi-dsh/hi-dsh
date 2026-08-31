@@ -1,62 +1,77 @@
 # hi-dsh
 
-A dsh plugin marketplace — discover, catalog, and install **dsh** plugins.
+一个 dsh 插件市场 —— 发现、收录、安装 **dsh** 插件。
 
-`hi-dsh` is itself a dsh bundle: an npm package whose manifest declares
-`"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`. When installed into a
-profile, it mounts a `Marketplace` Cordis service that the rest of a profile's
-surface (commands, the web UI, an agent tool) can render and extend.
+`hi-dsh` 本身就是一个 dsh bundle：一个 npm 包，`package.json` 里声明了
+`"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`。装进 profile 后，它会挂载一个
+`Marketplace` Cordis 服务，供 profile 的其他表面（命令、Web UI、agent 工具）读取和扩展；
+同时通过 `"dsh": { "client": … }` 声明把自己的 web 界面注入 dsh web。
 
-> **Status: skeleton.** This package is the load-bearing host shape only. Real
-> discovery (a curated catalog, a remote feed, or an npm-registry scan of
-> packages that declare `dsh.bundle`), search, and install actions are the
-> next milestone.
+> **状态：v0.2 —— 只读市场界面。** 逛、搜、筛选、复制安装命令可用；真正的安装
+> 动作（转发 `dsh plugin add`）属于下一个里程碑。英文版文档等版本稳定后再补。
 
-## What it does today
+## 目前的能力
 
-- Declares a valid dsh bundle (the `dsh.bundle.patch` marker).
-- Mounts a `Marketplace` service (`ctx.marketplace`) with a `list(filter)`
-  catalog lookup and a `count()`.
-- Registers the **`/hi-dsh`** slash command, which answers with the placeholder
-  text `功能更新中，敬请期待` (visible in the web UI command surface).
-- Logs a single startup line so a booted profile confirms the bundle activated.
+- 声明合法的 dsh bundle（`dsh.bundle.patch` 标记）**和** web 客户端
+  （`dsh.client` 声明，tsdown 构建为 `client/client.js` 工厂包）。
+- 挂载 `Marketplace` 服务（`ctx.marketplace`）：启动时加载共享目录 feed
+  （[awesome-dsh-plugin](https://awesome-dsh-plugin.com)，2500+ 插件，由其 CI 每日刷新），
+  提供 `list(filter)`、`count()`、`status()`；拉取失败时回退到 `config.catalog` 并如实上报。
+- Web 界面，注册在三个**增量**宿主座位上（不替换任何宿主组件）：
+  - 侧栏底部的 **Hi 按钮**（`sidebar.footer.action`，官方第三方座位；
+    侧栏收起时是 56px 细轨里的 36px 图标）；
+  - Hi 打开的**全屏市场页**（`shell.overlay`，Esc 关闭）；
+  - 会话视图环里的**「插件市场」标签页**（`conversation.view`，与轨迹视图同机制）。
+  市场页提供搜索、中英分类筛选、按 star/下载量/收录日期排序、一键复制安装命令。
+- 注册 **`/hi-dsh`** 斜杠命令，汇报目录 feed 状态（来源、数量、更新日期）。
+- 启动时打印日志，确认 bundle 激活与 feed 加载结果。
 
-After installing into the `web` profile, type `/hi-dsh` in the session to see
-the placeholder.
+装进 `web` profile 并重启 `dsh web` 后：点侧栏底部的 **Hi** 按钮打开市场，
+或在会话里输入 `/hi-dsh` 查看目录状态。
 
-## Install into a profile
+## 装进 profile
 
 ```sh
 dsh plugin --profile <name> add hi-dsh
 ```
 
-`dsh plugin` forwards the arguments to pnpm in the profile directory, then
-reconciles `dsh.profile.bundles` so a dependency that declares `dsh.bundle`
-joins the layer stack. The `<name>` profile must already exist (or be one of the
-auto-initializing `web` / `headless` profiles).
+`dsh plugin` 会把参数转发给 profile 目录里的 pnpm，然后调和 `dsh.profile.bundles`，
+让声明了 `dsh.bundle` 的依赖加入层栈。`<name>` profile 必须已存在（或是可自动初始化的
+`web` / `headless`）。
 
-## Development
+## 开发
 
 ```sh
-# clone, then add a catalog or install it into a profile
+# 克隆后，安装进某个 profile，或加入目录
 dsh plugin --profile web add .
 ```
 
-To confirm the plugin activates without a full session, inspect the composed
-tree:
+改动 `src/client/` 后重新构建浏览器端 bundle：
+
+```sh
+pnpm install   # 首次（装 tsdown）
+pnpm build     # 重新生成 client/client.js
+```
+
+想看插件是否激活、而不启动完整会话，可以检查组合后的配置树：
 
 ```sh
 dsh --profile web --dump-config
 ```
 
-## Layout
+## 结构
 
-| Path | Purpose |
+| 路径 | 用途 |
 | --- | --- |
-| `package.json` | Package manifest + `dsh.bundle.patch` marker. |
-| `cordis.patch.yml` | The bundle patch layer that inserts the `hi-dsh` row. |
-| `src/index.js` | Cordis plugin: `Marketplace` service + the default export. |
+| `package.json` | 包清单 + `dsh.bundle.patch` 与 `dsh.client` 声明。 |
+| `cordis.patch.yml` | 插入 `hi-dsh` 行的 bundle 补丁层。 |
+| `src/index.js` | Cordis 插件：`Marketplace` 服务（feed 拉取）+ `/hi-dsh` 命令。 |
+| `src/client/index.jsx` | 客户端入口：Hi 按钮 / 全屏市场页 / 会话标签页三个插槽注册。 |
+| `src/client/MarketPage.jsx` | 市场界面：搜索、分类筛选、排序、复制安装命令。 |
+| `src/client/feed.js` | 目录 feed 拉取与页内缓存。 |
+| `tsdown.config.js` | 客户端工厂包构建（`window.__ModuleLoader__.load` 包装）。 |
+| `client/client.js` | 构建产物，宿主 web 端加载（连 `.map` 一起提交，便于调试）。 |
 
-## License
+## 许可
 
 MIT

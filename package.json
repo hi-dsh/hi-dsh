@@ -1,24 +1,40 @@
 {
   "name": "hi-dsh",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "hi-dsh: a dsh plugin marketplace — discover, catalog, and install dsh plugins.",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./client": "./client/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
+    "client",
     "cordis.patch.yml",
+    "tsdown.config.js",
     "README.md",
-    "README.zh.md",
     "LICENSE"
   ],
+  "scripts": {
+    "build": "tsdown",
+    "prepare": "tsdown"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "platform": "web"
     }
   },
   "keywords": [
@@ -33,6 +49,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.14"
   },
   "license": "MIT",
   "repository": {
