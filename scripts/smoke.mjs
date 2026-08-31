@@ -118,6 +118,15 @@ check('卸载路由路径', code.includes('/hi-dsh/uninstall'))
 check('已安装路由路径', code.includes('/hi-dsh/installed'))
 check('旧复制按钮已移除', !code.includes('复制安装命令'))
 
+// --- 4b. 账号入口(头部右上角)+ 登录弹窗流程 surface -------------------------
+check('账号入口存在(GitHub 登录文案)', code.includes('使用 GitHub 登录'))
+check('Gitee 占位存在(即将支持)', code.includes('Gitee 登录') && code.includes('即将支持'))
+check('已登录/退出登录文案存在', code.includes('已登录') && code.includes('退出登录'))
+check('账号服务器地址(hi-dsh.com)', code.includes('https://hi-dsh.com'))
+check('弹窗回传消息来源标记', code.includes('hi-dsh-auth'))
+const q = (str) => code.includes(`'${str}'`) || code.includes(`"${str}"`)
+check('登录态 phases 完整', q('loading') && q('login') && q('out') && q('in') && q('error'))
+
 // --- 5. server modules parse & export the route + ledger surface -------------
 const install = await import('../src/install.js')
 check('install.js 导出 registerRoutes', typeof install.registerRoutes === 'function')

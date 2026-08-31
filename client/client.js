@@ -321,6 +321,113 @@ window.__ModuleLoader__.load({
 				border: "1px solid light-dark(#2563eb, #7ab0ff)",
 				background: "light-dark(#2563eb, rgba(122,176,255,.25))",
 				color: "light-dark(#ffffff, #dbe9ff)"
+			},
+			accountWrap: { position: "relative" },
+			accountBtn: {
+				cursor: "pointer",
+				font: "inherit",
+				color: "inherit",
+				display: "grid",
+				placeItems: "center",
+				padding: 5,
+				borderRadius: 8,
+				lineHeight: 0,
+				border: "1px solid light-dark(rgba(0,0,0,.15), rgba(255,255,255,.2))",
+				background: "transparent"
+			},
+			accountAvatar: {
+				width: 20,
+				height: 20,
+				borderRadius: "50%",
+				display: "block"
+			},
+			accountPop: {
+				position: "absolute",
+				right: 0,
+				top: "calc(100% + 8px)",
+				width: 270,
+				zIndex: 1200,
+				padding: 12,
+				borderRadius: 10,
+				fontSize: 13,
+				background: "light-dark(#ffffff, #26282e)",
+				color: "light-dark(#1f2328, #e8eaed)",
+				border: "1px solid light-dark(rgba(0,0,0,.12), rgba(255,255,255,.14))",
+				boxShadow: "0 12px 32px rgba(0,0,0,.2)"
+			},
+			accountPopTitle: {
+				fontSize: 12,
+				fontWeight: 700,
+				color: "light-dark(#6b7280, #9aa0a6)",
+				margin: "0 0 8px"
+			},
+			accountRowBtn: {
+				cursor: "pointer",
+				font: "inherit",
+				fontSize: 13,
+				color: "inherit",
+				width: "100%",
+				display: "flex",
+				alignItems: "center",
+				gap: 8,
+				padding: "8px 10px",
+				borderRadius: 8,
+				border: "1px solid light-dark(rgba(0,0,0,.15), rgba(255,255,255,.2))",
+				background: "transparent",
+				textAlign: "left"
+			},
+			accountRowDisabled: {
+				font: "inherit",
+				fontSize: 13,
+				color: "light-dark(#9aa0a6, #6b7280)",
+				width: "100%",
+				display: "flex",
+				alignItems: "center",
+				gap: 8,
+				padding: "8px 10px",
+				borderRadius: 8,
+				border: "1px dashed light-dark(rgba(0,0,0,.15), rgba(255,255,255,.2))",
+				marginTop: 8
+			},
+			accountBadge: {
+				marginLeft: "auto",
+				fontSize: 11,
+				padding: "1px 8px",
+				borderRadius: 999,
+				border: "1px solid light-dark(rgba(0,0,0,.14), rgba(255,255,255,.18))"
+			},
+			accountUser: {
+				display: "flex",
+				alignItems: "center",
+				gap: 10,
+				marginBottom: 10
+			},
+			accountAvatarLg: {
+				width: 36,
+				height: 36,
+				borderRadius: "50%",
+				flexShrink: 0
+			},
+			accountName: {
+				fontSize: 14,
+				fontWeight: 650
+			},
+			accountMeta: {
+				fontSize: 12,
+				color: "light-dark(#6b7280, #9aa0a6)",
+				marginTop: 2,
+				overflowWrap: "anywhere"
+			},
+			accountNote: {
+				fontSize: 13,
+				color: "light-dark(#6b7280, #9aa0a6)",
+				padding: "4px 0"
+			},
+			accountError: {
+				fontSize: 12,
+				lineHeight: 1.6,
+				color: "light-dark(#b91c1c, #fca5a5)",
+				margin: "0 0 10px"
 			}
 		};
 		//#endregion
@@ -481,6 +588,273 @@ window.__ModuleLoader__.load({
 					runUninstall(row);
 				}
 			}) : null);
+		}
+		//#endregion
+		//#region src/client/auth.js
+		const AUTH_SERVER = "https://hi-dsh.com";
+		const TOKEN_KEY = "hi-dsh.auth-token";
+		const listeners$1 = /* @__PURE__ */ new Set();
+		const authState = {
+			phase: "loading",
+			user: null,
+			error: null
+		};
+		function subscribeAuth(listener) {
+			listeners$1.add(listener);
+			return () => listeners$1.delete(listener);
+		}
+		function setAuth(patch) {
+			Object.assign(authState, patch);
+			for (const listener of listeners$1) listener();
+		}
+		function serverOrigin() {
+			return new URL(AUTH_SERVER).origin;
+		}
+		/** 启动时/重试时调用:有 token 就向服务器确认,没有就是未登录。失败显式报错。 */
+		async function initAuth() {
+			const token = localStorage.getItem(TOKEN_KEY);
+			if (!token) {
+				setAuth({
+					phase: "out",
+					user: null,
+					error: null
+				});
+				return;
+			}
+			try {
+				const res = await fetch(`${AUTH_SERVER}/api/auth/me`, { headers: { authorization: `Bearer ${token}` } });
+				if (res.status === 401) {
+					localStorage.removeItem(TOKEN_KEY);
+					setAuth({
+						phase: "out",
+						user: null,
+						error: null
+					});
+					return;
+				}
+				if (!res.ok) throw new Error(`账号服务返回 HTTP ${res.status}`);
+				setAuth({
+					phase: "in",
+					user: (await res.json()).user,
+					error: null
+				});
+			} catch (err) {
+				setAuth({
+					phase: "error",
+					user: null,
+					error: `无法确认登录状态:${err?.message ?? err}(网络或账号服务不可用,可重试;不影响市场浏览与安装)`
+				});
+			}
+		}
+		/** 打开登录弹窗。弹窗被浏览器拦截时报错,不静默降级。 */
+		function startLogin() {
+			const url = `${AUTH_SERVER}/api/auth/github/login?origin=${encodeURIComponent(window.location.origin)}`;
+			if (!window.open(url, "hi-dsh-login", "width=680,height=760")) {
+				setAuth({
+					phase: "error",
+					user: null,
+					error: "浏览器拦截了登录弹窗,请允许本站弹出窗口后重试。"
+				});
+				return;
+			}
+			setAuth({
+				phase: "login",
+				user: null,
+				error: null
+			});
+		}
+		let listening = false;
+		/** 监听登录弹窗回传的一次性 code 并换取 token。幂等,多次调用只注册一次。 */
+		function ensureAuthListener() {
+			if (listening) return;
+			listening = true;
+			window.addEventListener("message", async (event) => {
+				if (event.origin !== serverOrigin() || event.data?.source !== "hi-dsh-auth") return;
+				try {
+					const res = await fetch(`${AUTH_SERVER}/api/auth/exchange`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ code: event.data.code })
+					});
+					const body = await res.json().catch(() => ({}));
+					if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+					localStorage.setItem(TOKEN_KEY, body.token);
+					setAuth({
+						phase: "in",
+						user: body.user,
+						error: null
+					});
+				} catch (err) {
+					setAuth({
+						phase: "error",
+						user: null,
+						error: `登录码换取失败:${err?.message ?? err}(请重新登录)`
+					});
+				}
+			});
+		}
+		/** 退出登录:本地态立即清除,服务器会话注销;注销失败也如实报错。 */
+		async function logout() {
+			const token = localStorage.getItem(TOKEN_KEY);
+			localStorage.removeItem(TOKEN_KEY);
+			if (token) {
+				try {
+					const res = await fetch(`${AUTH_SERVER}/api/auth/logout`, {
+						method: "POST",
+						headers: { authorization: `Bearer ${token}` }
+					});
+					if (!res.ok) throw new Error(`HTTP ${res.status}`);
+					setAuth({
+						phase: "out",
+						user: null,
+						error: null
+					});
+				} catch (err) {
+					setAuth({
+						phase: "error",
+						user: null,
+						error: `服务器注销失败(${err?.message ?? err});本地登录态已清除。`
+					});
+				}
+				return;
+			}
+			setAuth({
+				phase: "out",
+				user: null,
+				error: null
+			});
+		}
+		//#endregion
+		//#region src/client/AccountButton.jsx
+		function useAuth() {
+			return (0, react.useSyncExternalStore)(subscribeAuth, () => authState);
+		}
+		const PERSON_ICON = (0, react.createElement)("svg", {
+			width: 18,
+			height: 18,
+			viewBox: "0 0 24 24",
+			fill: "none",
+			stroke: "currentColor",
+			strokeWidth: 2,
+			strokeLinecap: "round",
+			strokeLinejoin: "round",
+			"aria-hidden": true
+		}, (0, react.createElement)("path", { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }), (0, react.createElement)("circle", {
+			cx: 12,
+			cy: 7,
+			r: 4
+		}));
+		const GITHUB_ICON = (0, react.createElement)("svg", {
+			width: 16,
+			height: 16,
+			viewBox: "0 0 24 24",
+			fill: "currentColor",
+			"aria-hidden": true
+		}, (0, react.createElement)("path", { d: "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" }));
+		function avatarImg(url, style) {
+			return (0, react.createElement)("img", {
+				src: url,
+				style,
+				alt: "",
+				referrerPolicy: "no-referrer"
+			});
+		}
+		function popoverBody(auth, close) {
+			if (auth.phase === "loading") return (0, react.createElement)("div", { style: s.accountNote }, "正在查询登录状态…");
+			if (auth.phase === "error") return [
+				(0, react.createElement)("div", {
+					key: "t",
+					style: s.accountPopTitle
+				}, "账号服务异常"),
+				(0, react.createElement)("div", {
+					key: "e",
+					style: s.accountError
+				}, auth.error),
+				(0, react.createElement)("button", {
+					key: "r",
+					style: s.retry,
+					onClick: () => initAuth()
+				}, "重试")
+			];
+			if (auth.phase === "login") return (0, react.createElement)("div", { style: s.accountNote }, "正在打开 GitHub 授权窗口…完成授权后本页自动更新。");
+			if (auth.phase === "in") {
+				const u = auth.user;
+				return [
+					(0, react.createElement)("div", {
+						key: "t",
+						style: s.accountPopTitle
+					}, "已登录"),
+					(0, react.createElement)("div", {
+						key: "u",
+						style: s.accountUser
+					}, u.avatar_url ? avatarImg(u.avatar_url, s.accountAvatarLg) : null, (0, react.createElement)("div", { style: { minWidth: 0 } }, (0, react.createElement)("div", { style: s.accountName }, u.display_name), (0, react.createElement)("div", { style: s.accountMeta }, `${(u.providers ?? []).join(" / ")}${u.email ? ` · ${u.email}` : ""}`))),
+					(0, react.createElement)("button", {
+						key: "o",
+						style: s.accountRowBtn,
+						onClick: () => {
+							close();
+							logout();
+						}
+					}, "退出登录")
+				];
+			}
+			return [
+				(0, react.createElement)("div", {
+					key: "t",
+					style: s.accountPopTitle
+				}, "选择登录方式"),
+				(0, react.createElement)("button", {
+					key: "gh",
+					style: s.accountRowBtn,
+					onClick: () => startLogin(),
+					title: "通过 GitHub OAuth 登录 hi-dsh 账号"
+				}, GITHUB_ICON, (0, react.createElement)("span", null, "使用 GitHub 登录")),
+				(0, react.createElement)("div", {
+					key: "ge",
+					style: s.accountRowDisabled
+				}, (0, react.createElement)("span", null, "Gitee 登录"), (0, react.createElement)("span", { style: s.accountBadge }, "即将支持"))
+			];
+		}
+		function AccountButton() {
+			const auth = useAuth();
+			const [open, setOpen] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				ensureAuthListener();
+				if (auth.phase === "loading") initAuth();
+			}, []);
+			(0, react.useEffect)(() => {
+				if (!open) return void 0;
+				const onDocClick = (e) => {
+					if (!e.target.closest(".hi-dsh-account")) setOpen(false);
+				};
+				const onKey = (e) => {
+					if (e.key === "Escape") {
+						e.stopPropagation();
+						e.preventDefault();
+						setOpen(false);
+					}
+				};
+				document.addEventListener("click", onDocClick, true);
+				document.addEventListener("keydown", onKey, true);
+				return () => {
+					document.removeEventListener("click", onDocClick, true);
+					document.removeEventListener("keydown", onKey, true);
+				};
+			}, [open]);
+			const icon = auth.phase === "in" && auth.user?.avatar_url ? avatarImg(auth.user.avatar_url, s.accountAvatar) : PERSON_ICON;
+			return (0, react.createElement)("div", {
+				className: "hi-dsh-account",
+				style: s.accountWrap
+			}, (0, react.createElement)("button", {
+				style: s.accountBtn,
+				onClick: () => setOpen(!open),
+				"aria-expanded": open,
+				"aria-label": "hi-dsh 账号",
+				title: auth.phase === "in" ? `已登录:${auth.user?.display_name ?? ""}` : "登录 hi-dsh 账号"
+			}, icon), open ? (0, react.createElement)("div", {
+				style: s.accountPop,
+				role: "menu"
+			}, popoverBody(auth, () => setOpen(false))) : null);
 		}
 		//#endregion
 		//#region src/client/MarketPage.jsx
@@ -682,7 +1056,7 @@ window.__ModuleLoader__.load({
 			}, "插件市场"), (0, react.createElement)("button", {
 				style: tab === "installed" ? s.tabBtnActive : s.tabBtn,
 				onClick: () => setTab("installed")
-			}, "已安装插件")), tab === "market" && state.status === "ready" ? (0, react.createElement)("span", { style: s.count }, `${filtered.length} / ${plugins.length} 个插件 · 数据更新于 ${state.feed?.updated ?? "未知"}`) : null, onClose ? (0, react.createElement)("button", {
+			}, "已安装插件")), tab === "market" && state.status === "ready" ? (0, react.createElement)("span", { style: s.count }, `${filtered.length} / ${plugins.length} 个插件 · 数据更新于 ${state.feed?.updated ?? "未知"}`) : null, (0, react.createElement)(AccountButton), onClose ? (0, react.createElement)("button", {
 				style: s.close,
 				onClick: onClose,
 				title: "关闭 (Esc)"

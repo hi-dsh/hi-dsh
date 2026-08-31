@@ -14,6 +14,7 @@ import { loadFeed } from './feed.js'
 import { s } from './styles.js'
 import { ConfirmDialog } from './dialog.jsx'
 import { InstalledPage } from './InstalledPage.jsx'
+import { AccountButton } from './AccountButton.jsx'
 
 const PAGE_SIZE = 30
 const INSTALL_URL = '/hi-dsh/install'
@@ -205,6 +206,7 @@ export function MarketPage({ onClose } = {}) {
       tab === 'market' && state.status === 'ready'
         ? h('span', { style: s.count }, `${filtered.length} / ${plugins.length} 个插件 · 数据更新于 ${state.feed?.updated ?? '未知'}`)
         : null,
+      h(AccountButton),
       onClose ? h('button', { style: s.close, onClick: onClose, title: '关闭 (Esc)' }, '关闭 ✕') : null,
     ),
     tab === 'installed'

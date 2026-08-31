@@ -107,4 +107,42 @@ export const s = {
     border: '1px solid light-dark(#2563eb, #7ab0ff)',
     background: 'light-dark(#2563eb, rgba(122,176,255,.25))', color: 'light-dark(#ffffff, #dbe9ff)',
   },
+  // —— 账号入口(头部右上角,紧挨「关闭」左侧)与弹层 ——
+  accountWrap: { position: 'relative' },
+  accountBtn: {
+    cursor: 'pointer', font: 'inherit', color: 'inherit', display: 'grid', placeItems: 'center',
+    padding: 5, borderRadius: 8, lineHeight: 0,
+    border: '1px solid light-dark(rgba(0,0,0,.15), rgba(255,255,255,.2))',
+    background: 'transparent',
+  },
+  accountAvatar: { width: 20, height: 20, borderRadius: '50%', display: 'block' },
+  accountPop: {
+    position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 270, zIndex: 1200,
+    padding: 12, borderRadius: 10, fontSize: 13,
+    background: 'light-dark(#ffffff, #26282e)', color: 'light-dark(#1f2328, #e8eaed)',
+    border: '1px solid light-dark(rgba(0,0,0,.12), rgba(255,255,255,.14))',
+    boxShadow: '0 12px 32px rgba(0,0,0,.2)',
+  },
+  accountPopTitle: { fontSize: 12, fontWeight: 700, color: 'light-dark(#6b7280, #9aa0a6)', margin: '0 0 8px' },
+  accountRowBtn: {
+    cursor: 'pointer', font: 'inherit', fontSize: 13, color: 'inherit', width: '100%',
+    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8,
+    border: '1px solid light-dark(rgba(0,0,0,.15), rgba(255,255,255,.2))',
+    background: 'transparent', textAlign: 'left',
+  },
+  accountRowDisabled: {
+    font: 'inherit', fontSize: 13, color: 'light-dark(#9aa0a6, #6b7280)', width: '100%',
+    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8,
+    border: '1px dashed light-dark(rgba(0,0,0,.15), rgba(255,255,255,.2))', marginTop: 8,
+  },
+  accountBadge: {
+    marginLeft: 'auto', fontSize: 11, padding: '1px 8px', borderRadius: 999,
+    border: '1px solid light-dark(rgba(0,0,0,.14), rgba(255,255,255,.18))',
+  },
+  accountUser: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 },
+  accountAvatarLg: { width: 36, height: 36, borderRadius: '50%', flexShrink: 0 },
+  accountName: { fontSize: 14, fontWeight: 650 },
+  accountMeta: { fontSize: 12, color: 'light-dark(#6b7280, #9aa0a6)', marginTop: 2, overflowWrap: 'anywhere' },
+  accountNote: { fontSize: 13, color: 'light-dark(#6b7280, #9aa0a6)', padding: '4px 0' },
+  accountError: { fontSize: 12, lineHeight: 1.6, color: 'light-dark(#b91c1c, #fca5a5)', margin: '0 0 10px' },
 }

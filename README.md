@@ -46,6 +46,11 @@
     完全停用"；pnpm 报告成功但依赖仍在时按失败处理（不伪造成功）；
   - 边界：只允许卸载账本记录的包（终端装的请用命令行管理）；拒绝在市场内卸载 hi-dsh 自身；
     账本损坏时返回可行动的错误（500），不装作空列表。
+- **账号登录**（头部右上角账号图标，悬浮面板与会话标签页都有）：未登录点开是
+  平台选择（当前只有 GitHub，Gitee 占位「即将支持」），弹窗完成 GitHub OAuth
+  （授权码模式，账号服务是独立仓库 `hi-dsh-server`，部署于 hi-dsh.com）；
+  已登录显示 GitHub 头像与账号信息，可退出登录。登录态存 localStorage 的
+  Bearer token，账号服务不可用/弹窗被拦截等异常在弹层内显式报错，不静默降级。
 - 注册 **`/hi-dsh`** 斜杠命令，汇报目录 feed 状态（来源、数量、更新日期）。
 - 启动时打印日志，确认 bundle 激活与 feed 加载结果。
 
@@ -94,6 +99,8 @@ dsh --profile web --dump-config
 | `src/client/MarketPage.jsx` | 市场界面：两个标签页（插件市场 / 已安装插件）、搜索、分类筛选、排序、安装确认框与安装流程。 |
 | `src/client/InstalledPage.jsx` | 已安装列表：账本 ∩ 依赖的展示、卸载确认与卸载流程。 |
 | `src/client/dialog.jsx` | 安装 / 卸载共用的确认对话框。 |
+| `src/client/auth.js` | 账号登录态 store + 登录弹窗流程（code 换 token，见 hi-dsh-server 仓库）。 |
+| `src/client/AccountButton.jsx` | 头部右上角账号入口：登录平台选择 / 已登录信息 / 退出登录。 |
 | `src/client/styles.js` | 客户端共享内联样式。 |
 | `src/client/feed.js` | 目录 feed 拉取与页内缓存。 |
 | `tsdown.config.js` | 客户端工厂包构建（`window.__ModuleLoader__.load` 包装）。 |
