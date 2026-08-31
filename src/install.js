@@ -681,6 +681,10 @@ export function registerRoutes({ host, profile, getFeed, logger }) {
             sendJson(response, 400, { error: '缺少或无效的插件包名' })
             return
           }
+          // 卸载 hi-dsh 自身只能在终端执行（`dsh plugin remove hi-dsh`），由 dsh CLI
+          // 完成，本插件代码不参与，因此无从清理。那次卸载只移除 hi-dsh 包和它自己的
+          // bundle 层——既不卸载它装过的插件，也不删除记账账本。账本放在 profile 目录
+          // （包外）正是为了活得比 hi-dsh 久：重装后这些插件仍在已安装列表，仍可从这里卸载。
           if (name === SELF_NAME) {
             sendJson(response, 400, { error: `不能通过市场卸载 hi-dsh 自身；请在终端执行 dsh plugin --profile ${profile} remove ${SELF_NAME}` })
             return
